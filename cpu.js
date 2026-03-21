@@ -20,12 +20,12 @@ const REGS = Object.freeze({
     HL_DEREF: -1
 })
 
-const FLAG_SHIFTS = {
+const FLAG_SHIFTS = Object.freeze({
     Z: 7,
     N: 6,
     H: 5,
     C: 4,
-}
+})
 
 const asUint16 = (/** @type {number} */ n) => n & 0xFFFF;
 
@@ -80,7 +80,7 @@ class GameBoyCore {
     }
     set AF(v) {
         this.regs[REGS.A] = v >>> 8 & 0xFF;
-        this.regs[REGS.F] = v >>> 0 & 0xFF;
+        this.regs[REGS.F] = v >>> 0 & 0xF0;
         this.unpackFlags();
     }
 
@@ -160,7 +160,6 @@ class GameBoyCore {
 
 
     #createFunctionArray() {
-
         const getRegFromIndex =
             (/** @type {number} */ index) => {
                 switch (index) {
@@ -218,12 +217,14 @@ class GameBoyCore {
         }
 
         const POP_R16 = (/** @type {REG16} */ t) => {
-            let returnAddr = 0;
-            returnAddr |= this.MMU.loadByteDirect(this.SP) << 0;
+            let val = 0;
+
+            val |= this.MMU.loadByteMMU(this.SP) << 0;
             this.SP = asUint16(this.SP + 1);
-            returnAddr |= this.MMU.loadByteDirect(this.SP) << 8;
+            val |= this.MMU.loadByteMMU(this.SP) << 8;
             this.SP = asUint16(this.SP + 1);
-            this[t] = returnAddr;
+
+            this[t] = val;
         }
 
         const CALL =
@@ -299,25 +300,49 @@ class GameBoyCore {
             const flags = this.flags;
             if(opcode1 < 0x40){
                 switch(opcode1 >> 3){
+                    case 0:{
+                        flags.C = val >> 7 & 1;
+                        val = ((val << 1) | (val >> 7 & 1));
+                    }break;
+                    case 1:{
+                        flags.C = val & 1;
+                        val = ((val >> 1) | ((val & 1) << 7));
+                    }break;
+                    case 2:{
+                        const cy = flags.C
+                        flags.C = val >> 7 & 1;
+                        val = ((val << 1) | cy);
+                    }break;
                     case 3:{
                         const cy = flags.C;
                         flags.C = val & 1;
-                        flags.N = 0;
-                        flags.H = 0;
-                        val = ((val >> 1) | (cy << 7)) & 0xFF;
-                        flags.Z = +(val == 0);
-                    }
+                        val = ((val >> 1) | (cy << 7));
+                    }break;
+                    case 4:{
+                        flags.C = val >> 7 & 1;
+                        val = (val << 1);
+                    }break;
+                    case 5:{
+                        flags.C = val & 1;
+                        val = (val << 24) >> 24; // sign extend to int8
+                        val = (val >> 1);
+                    }break;
+                    case 6:{
+                        val = (val >> 4 & 0xF) | ((val >> 0 & 0xF) << 4);
+                        flags.C = 0;
+                    }break;
                     case 7:{
                         flags.C = val & 1;
-                        flags.N = 0;
-                        flags.H = 0;
                         val >>= 1;
-                        flags.Z = +(val == 0);
                     }break;
                     default:{
-                        debugger;
+                        throw new Error("unreachable!");
                     }
                 }
+                val &= 0xFF;
+                flags.N = 0;
+                flags.H = 0;
+                flags.Z = +(val === 0);
             } else if (opcode1 >= 0x40 && opcode1 <= 0x7F) {
                 const bitIndex = opcode1 >> 3 & 7;
                 flags.Z = +((val >> bitIndex & 1) === 0);
@@ -325,9 +350,15 @@ class GameBoyCore {
                 flags.H = 1;
                 return;
             } else {
-                debugger;
+                const bitIndex = opcode1 >> 3 & 7;
+                const shiftMask = 1 << bitIndex;
+                if(opcode1 >= 0x80 && opcode1 <= 0xBF){
+                    val &= ~shiftMask;
+                }else{
+                    val |=  shiftMask;
+                }
             }
-            setRegFromIndex(regIndex, val)
+            setRegFromIndex(regIndex, val & 0xFF)
         }
 
         const LOAD_A_R15_DEREF = (/** @type {REG16} */t) => {
@@ -557,9 +588,33 @@ class GameBoyCore {
             this.flags.N = 0;
             this.flags.H = 0;
         }
+
+        const DAA = () => {
+            let A = this.A;
+            const flags = this.flags;
+            if(flags.N) {
+                A -= (0x60*flags.C) + (0x06*flags.H);
+            } else {
+                if(flags.C || A > 0x99){
+                    flags.C = 1;
+                    A += 0x60;
+                }
+                A += 0x06 * +(flags.H || (A & 0xF) > 0x09);
+            }
+            A &= 0xFF;
+            this.A = A;
+            flags.Z = +(A === 0);
+            flags.H = 0;
+        }
+
         const LOAD_SP_HL = () => {
             this.SP = this.HL;
-        }         
+        }
+
+        const RST = (/** @type {number} */ addr) => {
+            PUSH_R16("PC");
+            this.PC = addr;
+        }
 
         /**
          * @type {Array<Function | null>}
@@ -824,6 +879,7 @@ class GameBoyCore {
         v[0x0F] = RRCA;
         v[0x17] = RLA;
         v[0x1F] = RRA;
+        v[0x27] = DAA;
         v[0x2F] = CPL;
         v[0x37] = SCF;
         v[0x3F] = CCF;
@@ -833,6 +889,15 @@ class GameBoyCore {
         v[0x08] = LOAD_R16_DEREF_SP;
         v[0xD9] = RETI;
         v[0xF9] = LOAD_SP_HL;
+
+        v[0xC7] = RST.bind(this, 0x00);
+        v[0xCF] = RST.bind(this, 0x08);
+        v[0xD7] = RST.bind(this, 0x10);
+        v[0xDF] = RST.bind(this, 0x18);
+        v[0xE7] = RST.bind(this, 0x20);
+        v[0xEF] = RST.bind(this, 0x28);
+        v[0xF7] = RST.bind(this, 0x30);
+        v[0xFF] = RST.bind(this, 0x38);
 
         return v;
     }
