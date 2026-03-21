@@ -6,6 +6,7 @@
 "use strict"
 
 import { Memory } from "./mmu.js";
+import { ctz32 } from "./util.js";
 
 const REGS = Object.freeze({
     B: 0,
@@ -50,7 +51,7 @@ class GameBoyCore {
         // used for lazy stepping
         this.bufferedCycles = 0;
         this.opJumpTable = this.#createFunctionArray();
-        this.interruptFlag = false;
+        this.interruptFlag = 0;
     }
 
     get BC() {
@@ -96,6 +97,16 @@ class GameBoyCore {
     }
     set A(v) {
         this.regs[REGS.A] = v;
+    }
+
+    get IEreg(){
+        return this.MMU.HRAM[0x7F];
+    }
+    get IFreg(){
+        return this.MMU.IO[0x0F];
+    }
+    set IFreg(v){
+        this.MMU.IO[0x0F] = v;
     }
 
     resetCPU() {
@@ -149,17 +160,44 @@ class GameBoyCore {
         return high << 8 | low;
     }
 
+    /**
+     * @param {number} targetAddress
+     */
+    #executeInterrupt(targetAddress){
+        // 2 M cycles of nothing;
+        let r = this.PC;
+        this.SP = asUint16(this.SP - 1);
+        this.MMU.storeByteMMU(this.SP, r >>> 8 & 0xFF);
+        this.SP = asUint16(this.SP - 1);
+        this.MMU.storeByteMMU(this.SP, r >>> 0 & 0xFF);
+        this.PC = targetAddress;
+    }
+
+    checkForInterrupts(){
+        return this.interruptFlag == 1 && ((this.IEreg & this.IFreg) > 0);
+    }
+
     stepSingle() {
+
+        if(this.checkForInterrupts()){
+            let interruptTester = this.IEreg & this.IFreg;
+            let lowestInterruptBit = ctz32(interruptTester);
+            if(lowestInterruptBit > 4) return;
+            let interruptTargetAddress = 0x40 + (lowestInterruptBit * 8);
+            this.#executeInterrupt(interruptTargetAddress);
+
+            this.interruptFlag = 0;
+            this.IFreg &= ~(1 << lowestInterruptBit);
+        }
+
         const opcode = this.#readAndIncrPC();
         const f = this.opJumpTable[opcode];
         if (f == null) {
-            debugger;
+            //debugger;
             return;
         }
         f();
     }
-
-
     #createFunctionArray() {
         const getRegFromIndex =
             (/** @type {number} */ index) => {
@@ -248,8 +286,8 @@ class GameBoyCore {
                 }
             }
         const RETI = () => {
-            RET(true, "Z", 0);
-            this.interruptFlag = true;
+            POP_R16("PC");
+            this.interruptFlag = 1;
         }
         
 
@@ -265,14 +303,9 @@ class GameBoyCore {
 
         const LOAD_REG_IMM8 =
             (/** @type {number} */ regIndex) => {
-                const target = regIndex;
                 return () => {
                     const imm8 = this.#loadU8fromPC();
-                    if (regIndex == REGS.HL_DEREF) {
-                        this.HL_DEREF = imm8;
-                    } else {
-                        this.regs[regIndex] = imm8;
-                    }
+                    setReg(regIndex, imm8);
                 }
             }
 
@@ -296,10 +329,9 @@ class GameBoyCore {
 
         const LOAD_R16_U16 =
             (/** @type {REG16} */ t) => {
-                const target = t;
                 return () => {
                     const imm16 = this.#loadU16fromPC();
-                    this[target] = imm16;
+                    this[t] = imm16;
                 }
             }
 
@@ -440,8 +472,8 @@ class GameBoyCore {
                 const A = getReg(regIndex);
                 const R = A + B;
                 flags.Z = +((R & 0xFF) === 0);
-                flags.N = 0;
-                const Htest = ((A & 0xF) + (B & 0xF)) & 0xFF;
+                flags.N = B < 0 ? 1 : 0;
+                const Htest = ((A & 0xF) + (B % 0x10)) & 0xFF;
                 flags.H = +(Htest > 0xF);
                 setReg(regIndex, R & 0xFF);
             }
@@ -540,7 +572,7 @@ class GameBoyCore {
                 }
             }
 
-        const SET_INTR_FLAG = (/** @type {boolean} */ val) => {
+        const SET_INTR_FLAG = (/** @type {number} */ val) => {
             return () => this.interruptFlag = val;
         }
 
@@ -549,7 +581,7 @@ class GameBoyCore {
             this.MMU.storeByteMMU(asUint16(addr + 0), this.SP >> 0 & 0xFF);
             this.MMU.storeByteMMU(asUint16(addr + 1), this.SP >> 8 & 0xFF);
         }
-        
+
         const RLA = () => {
             const flags = this.flags;
             const CY = flags.C;
@@ -640,13 +672,15 @@ class GameBoyCore {
 
         const ADD_R16_SP_I8 = (/** @type {REG16} */ t) => {
             const flags = this.flags;
-            const A = this[t];
+            const A = this.SP;
             const B = this.#loadI8fromPC();
             const R = A + B;
-            const Htest = ((A & 0xFFF) + (B & 0xFFF)) & 0xFFFF;
+            const Htest = ((A & 0x0F) + (B & 0x0F)) & 0xFFFF;
+            const Ctest = ((A & 0xFF) + (B & 0xFF)) & 0xFFFF;
+
             flags.N = 0;
-            flags.H = +(Htest > 0xFFF);
-            flags.C = +(R > 0xFFFF);
+            flags.H = +(Htest > 0xF);
+            flags.C = +(Ctest > 0xFF);
             flags.Z = 0;
             this[t] = asUint16(R);
         }
@@ -895,8 +929,8 @@ class GameBoyCore {
         v[0x29] = ADD_HL_REG16("HL");
         v[0x39] = ADD_HL_REG16("SP");
 
-        v[0xF3] = SET_INTR_FLAG(false);
-        v[0xFB] = SET_INTR_FLAG(true);
+        v[0xF3] = SET_INTR_FLAG(0);
+        v[0xFB] = SET_INTR_FLAG(1);
 
         v[0xEA] = STORE_A_IMM16_DEREF;
         v[0xFA] = LOAD_A_IMM16_DEREF;
@@ -942,6 +976,13 @@ class GameBoyCore {
 
         return v;
     }
+
+    debugPrintRegs(){
+        const hex = (/** @type {number} */ n) => n.toString(16).padStart(4, '0');
+        let r = `BC ${hex(this.BC)} \nDE ${hex(this.DE)}\nHL ${hex(this.HL)}\nAF ${hex(this.AF)}`
+            +`\nSP ${hex(this.SP)}\nPC ${hex(this.PC)}`
+        console.log(r);
+    }
 }
 
 /**
@@ -959,11 +1000,13 @@ function _init(romData) {
  */
 function _run(cpuInstance) {
     cpuInstance.resetCPU();
-    for (let i = 0; i < 1e7; i++) {
-        cpuInstance.stepSingle();
-
+    while(1){
+        for (let i = 0; i < 1e7; i++) {
+            cpuInstance.stepSingle();
+        }
+        debugger;
+        break;
     }
-    debugger
 }
 
 export { _init }

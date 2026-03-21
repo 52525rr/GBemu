@@ -1,6 +1,7 @@
 //@ts-check
-"use strict"
+import { decodeCartHeader, MAPPERS, createMapperCallbackBinding } from "./mappers.js";
 
+"use strict"
 /**
  * @param {Uint8Array} romData
  */
@@ -18,6 +19,8 @@ class Memory{
      * @param {boolean} isGBC
      */
     constructor(romFile, isGBC = false){
+        this.serialOutput = "";
+
         assertRomSize(romFile);
         this.ROM  = new Uint8Array(romFile);
         this.WRAM = new Uint8Array(0x2000);
@@ -26,10 +29,13 @@ class Memory{
         this.OAM  = new Uint8Array(0xA0);
         this.IO   = new Uint8Array(0x80);
         this.HRAM = new Uint8Array(0x80);
-
-        this.serialOutput = ""
-
         this.romBank = 1;
+
+        this.CART_DATA = decodeCartHeader(romFile);
+        const CART_MAPPER = this.CART_DATA.MBC;
+
+        const mapperCallbackBinding = createMapperCallbackBinding(this);
+        this.mapperCallback = mapperCallbackBinding[CART_MAPPER];
     }
 
     /**
@@ -39,10 +45,10 @@ class Memory{
         if(addr >= 0x0000 && addr < 0x3FFF){
             return this.ROM[addr];
 
-        } else if(addr >= 0x4000 && addr < 0x7FFF){
+        } else if(addr >= 0x4000 && addr <= 0x7FFF){
             return this.ROM[(addr - 0x4000) + this.romBank * 0x4000];
 
-        } else if(addr >= 0x8000 && addr < 0x9FFF){
+        } else if(addr >= 0x8000 && addr <= 0x9FFF){
             return this.VRAM[addr - 0x8000];
 
         } else if (addr >= 0xA000 && addr <= 0xBFFF){
@@ -72,15 +78,10 @@ class Memory{
             this.serialOutput += String.fromCharCode(byte);
         }
 
-        if(addr >= 0x0000 && addr < 0x3FFF){
-            // blehhh
-            // debugger;
+        if(addr >= 0x0000 && addr <= 0x7FFF){
+            this.mapperCallback(addr, byte);
 
-        } else if(addr >= 0x4000 && addr < 0x7FFF){
-            // fix to use an MBC handler
-            debugger;
-
-        } else if(addr >= 0x8000 && addr < 0x9FFF){
+        } else if(addr >= 0x8000 && addr <= 0x9FFF){
             this.VRAM[addr - 0x8000] = byte;
 
         } else if (addr >= 0xA000 && addr <= 0xBFFF){
@@ -99,6 +100,8 @@ class Memory{
             this.HRAM[addr - 0xFF80] = byte;
         }
     }
+
+    
 
     /**
      * @param {number} addr

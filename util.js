@@ -11,4 +11,6 @@ const littleEndian = (() => {
     return u8[0] == 1;
 })()
 
-export { sleep, littleEndian }
+const ctz32 = x => {x = x >>> 0; return x ? 31 - Math.clz32(x & -x) : 32}
+
+export { sleep, littleEndian, ctz32 }
