@@ -28,6 +28,7 @@ const FLAG_SHIFTS = Object.freeze({
 })
 
 const asUint16 = (/** @type {number} */ n) => n & 0xFFFF;
+const asInt8   = (/** @type {number} */ n) => (n << 24) >> 24;
 
 class GameBoyCore {
     /**
@@ -284,6 +285,15 @@ class GameBoyCore {
             this.A = this.MMU.loadByteMMU(addr);
         }
 
+        const STORE_ZPAGE_C = () => {
+            const addr = 0xFF00 | this.regs[REGS.C];
+            this.MMU.storeByteMMU(addr, this.A);
+        }
+        const LOAD_ZPAGE_C = () => {
+            const addr = 0xFF00 | this.regs[REGS.C];
+            this.A = this.MMU.loadByteMMU(addr);
+        }
+
         const LOAD_R16_U16 =
             (/** @type {REG16} */ t) => {
                 const target = t;
@@ -303,38 +313,46 @@ class GameBoyCore {
                     case 0:{
                         flags.C = val >> 7 & 1;
                         val = ((val << 1) | (val >> 7 & 1));
-                    }break;
+                    } break;
+
                     case 1:{
                         flags.C = val & 1;
                         val = ((val >> 1) | ((val & 1) << 7));
-                    }break;
+                    } break;
+
                     case 2:{
                         const cy = flags.C
                         flags.C = val >> 7 & 1;
                         val = ((val << 1) | cy);
-                    }break;
+                    } break;
+
                     case 3:{
                         const cy = flags.C;
                         flags.C = val & 1;
                         val = ((val >> 1) | (cy << 7));
-                    }break;
+                    } break;
+
                     case 4:{
                         flags.C = val >> 7 & 1;
                         val = (val << 1);
-                    }break;
+                    } break;
+
                     case 5:{
                         flags.C = val & 1;
-                        val = (val << 24) >> 24; // sign extend to int8
+                        val = asInt8(val);
                         val = (val >> 1);
-                    }break;
+                    } break;
+
                     case 6:{
                         val = (val >> 4 & 0xF) | ((val >> 0 & 0xF) << 4);
                         flags.C = 0;
-                    }break;
+                    } break;
+
                     case 7:{
                         flags.C = val & 1;
                         val >>= 1;
-                    }break;
+                    } break;
+
                     default:{
                         throw new Error("unreachable!");
                     }
@@ -358,7 +376,7 @@ class GameBoyCore {
                     val |=  shiftMask;
                 }
             }
-            setRegFromIndex(regIndex, val & 0xFF)
+            setRegFromIndex(regIndex, val & 0xFF);
         }
 
         const LOAD_A_R15_DEREF = (/** @type {REG16} */t) => {
@@ -413,12 +431,13 @@ class GameBoyCore {
                 flags.N = 0;
                 flags.H = +(Htest > 0xFFF);
                 flags.C = +(R > 0xFFFF);
+                this.HL = asUint16(R);
             }
         }
         const ADDTO_REG = (/** @type {number} */ regIndex, /** @type {number} */ B) => {
             return () => {
                 const flags = this.flags;
-                const A = getReg(regIndex)
+                const A = getReg(regIndex);
                 const R = A + B;
                 flags.Z = +((R & 0xFF) === 0);
                 flags.N = 0;
@@ -479,6 +498,7 @@ class GameBoyCore {
                 flags.N = 0;
                 flags.H = 1;
                 flags.C = 0;
+                this.A = R;
             }
         }
 
@@ -493,6 +513,7 @@ class GameBoyCore {
                 flags.N = 0;
                 flags.H = 0;
                 flags.C = 0;
+                this.A = R;
             }
         }
 
@@ -507,6 +528,7 @@ class GameBoyCore {
                 flags.N = 0;
                 flags.H = 0;
                 flags.C = 0;
+                this.A = R;
             }
         }
 
@@ -527,7 +549,17 @@ class GameBoyCore {
             this.MMU.storeByteMMU(asUint16(addr + 0), this.SP >> 0 & 0xFF);
             this.MMU.storeByteMMU(asUint16(addr + 1), this.SP >> 8 & 0xFF);
         }
-
+        
+        const RLA = () => {
+            const flags = this.flags;
+            const CY = flags.C;
+            let val = this.A
+            this.A = ((val << 1) | CY) & 0xFF;
+            flags.Z = 0;
+            flags.N = 0;
+            flags.H = 0;
+            flags.C = val >> 7 & 1;
+        }
         const RRA = () => {
             const flags = this.flags;
             const CY = flags.C;
@@ -556,17 +588,7 @@ class GameBoyCore {
             flags.H = 0;
             flags.C = val & 1;
         }
-
-        const RLA = () => {
-            const flags = this.flags;
-            const CY = flags.C;
-            let val = this.A
-            this.A = ((val << 1) | CY) & 0xFF;
-            flags.Z = 0;
-            flags.N = 0;
-            flags.H = 0;
-            flags.C = val >> 7 & 1;
-        }
+        
 
         const JUMP_HL = () => {
             this.PC = this.HL;
@@ -616,6 +638,19 @@ class GameBoyCore {
             this.PC = addr;
         }
 
+        const ADD_R16_SP_I8 = (/** @type {REG16} */ t) => {
+            const flags = this.flags;
+            const A = this[t];
+            const B = this.#loadI8fromPC();
+            const R = A + B;
+            const Htest = ((A & 0xFFF) + (B & 0xFFF)) & 0xFFFF;
+            flags.N = 0;
+            flags.H = +(Htest > 0xFFF);
+            flags.C = +(R > 0xFFFF);
+            flags.Z = 0;
+            this[t] = asUint16(R);
+        }
+
         /**
          * @type {Array<Function | null>}
          */
@@ -656,6 +691,8 @@ class GameBoyCore {
 
         v[0xE0] = STORE_ZPAGE_IMM8;
         v[0xF0] = LOAD_ZPAGE_IMM8;
+        v[0xE2] = STORE_ZPAGE_C;
+        v[0xF2] = LOAD_ZPAGE_C;
 
         v[0x01] = LOAD_R16_U16("BC");
         v[0x11] = LOAD_R16_U16("DE");
@@ -777,7 +814,8 @@ class GameBoyCore {
         v[0x84] = ALU_ADD(REGS.H, false);
         v[0x85] = ALU_ADD(REGS.L, false);
         v[0x86] = ALU_ADD(REGS.HL_DEREF, false);
-        v[0x87] = ALU_ADD(REGS.A, true);
+        v[0x87] = ALU_ADD(REGS.A, false);
+
         v[0x88] = ALU_ADD(REGS.B, true);
         v[0x89] = ALU_ADD(REGS.C, true);
         v[0x8A] = ALU_ADD(REGS.D, true);
@@ -795,7 +833,8 @@ class GameBoyCore {
         v[0x94] = ALU_SUB(REGS.H, false);
         v[0x95] = ALU_SUB(REGS.L, false);
         v[0x96] = ALU_SUB(REGS.HL_DEREF, false);
-        v[0x97] = ALU_SUB(REGS.A, true);
+        v[0x97] = ALU_SUB(REGS.A, false);
+
         v[0x98] = ALU_SUB(REGS.B, true);
         v[0x99] = ALU_SUB(REGS.C, true);
         v[0x9A] = ALU_SUB(REGS.D, true);
@@ -814,6 +853,7 @@ class GameBoyCore {
         v[0xA5] = ALU_AND(REGS.L);
         v[0xA6] = ALU_AND(REGS.HL_DEREF);
         v[0xA7] = ALU_AND(REGS.A);
+
         v[0xA8] = ALU_XOR(REGS.B);
         v[0xA9] = ALU_XOR(REGS.C);
         v[0xAA] = ALU_XOR(REGS.D);
@@ -823,7 +863,7 @@ class GameBoyCore {
         v[0xAE] = ALU_XOR(REGS.HL_DEREF);
         v[0xAF] = ALU_XOR(REGS.A);
 
-        // OR
+        // OR and CMP
         v[0xB0] = ALU_OR(REGS.B);
         v[0xB1] = ALU_OR(REGS.C);
         v[0xB2] = ALU_OR(REGS.D);
@@ -832,8 +872,6 @@ class GameBoyCore {
         v[0xB5] = ALU_OR(REGS.L);
         v[0xB6] = ALU_OR(REGS.HL_DEREF);
         v[0xB7] = ALU_OR(REGS.A);
-
-        // CMP 
         v[0xB8] = ALU_SUB(REGS.B, false, false, false);
         v[0xB9] = ALU_SUB(REGS.C, false, false, false);
         v[0xBA] = ALU_SUB(REGS.D, false, false, false);
@@ -856,8 +894,6 @@ class GameBoyCore {
         v[0x19] = ADD_HL_REG16("DE");
         v[0x29] = ADD_HL_REG16("HL");
         v[0x39] = ADD_HL_REG16("SP");
-
-        v[0x00] = () => 0; // NOP
 
         v[0xF3] = SET_INTR_FLAG(false);
         v[0xFB] = SET_INTR_FLAG(true);
@@ -898,6 +934,11 @@ class GameBoyCore {
         v[0xEF] = RST.bind(this, 0x28);
         v[0xF7] = RST.bind(this, 0x30);
         v[0xFF] = RST.bind(this, 0x38);
+
+        v[0xE8] = ADD_R16_SP_I8.bind(this, "SP");
+        v[0xF8] = ADD_R16_SP_I8.bind(this, "HL");
+
+        v[0x00] = () => 0; // NOP
 
         return v;
     }

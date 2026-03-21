@@ -19,7 +19,7 @@ async function _start(){
     if(lock)return;
     lock = true;
 
-    let ROMfile = await readFileAsArray(input.files[0])
+    let ROMfile = await readFileAsArray(input.files[0]);
     _init(ROMfile);
 }
 

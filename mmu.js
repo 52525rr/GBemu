@@ -1,7 +1,6 @@
 //@ts-check
 "use strict"
 
-
 /**
  * @param {Uint8Array} romData
  */
