@@ -42,7 +42,7 @@ class Memory{
      * @param {number} addr
      */
     loadByteDirect(addr){
-        if(addr >= 0x0000 && addr < 0x3FFF){
+        if(addr >= 0x0000 && addr <= 0x3FFF){
             return this.ROM[addr];
 
         } else if(addr >= 0x4000 && addr <= 0x7FFF){

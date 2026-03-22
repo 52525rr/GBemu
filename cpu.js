@@ -1001,7 +1001,7 @@ function _init(romData) {
 function _run(cpuInstance) {
     cpuInstance.resetCPU();
     while(1){
-        for (let i = 0; i < 1e7; i++) {
+        for (let i = 0; i < 3e7; i++) {
             cpuInstance.stepSingle();
         }
         debugger;
