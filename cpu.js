@@ -5,6 +5,7 @@
  */
 "use strict"
 
+import { IOManager } from "./io.js";
 import { Memory } from "./mmu.js";
 import { ctz32 } from "./util.js";
 
@@ -40,6 +41,7 @@ class GameBoyCore {
         this.PC = 0;
         this.SP = 0;
         this.MMU = new Memory(romData);
+        this.IOhandler = new IOManager(this);
 
         this.flags = {
             Z: 0,
@@ -52,6 +54,9 @@ class GameBoyCore {
         this.bufferedCycles = 0;
         this.opJumpTable = this.#createFunctionArray();
         this.interruptFlag = 0;
+
+        this.cpuSpeed = 1;
+        this.cyclesPerTick = 4;
     }
 
     get BC() {
@@ -171,6 +176,11 @@ class GameBoyCore {
         this.SP = asUint16(this.SP - 1);
         this.MMU.storeByteMMU(this.SP, r >>> 0 & 0xFF);
         this.PC = targetAddress;
+    }
+
+    runAllCachedCycles(){
+        this.IOhandler.tick(this.bufferedCycles);
+        this.bufferedCycles = 0;
     }
 
     checkForInterrupts(){
@@ -1009,4 +1019,4 @@ function _run(cpuInstance) {
     }
 }
 
-export { _init }
+export { _init, GameBoyCore }
