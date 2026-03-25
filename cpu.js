@@ -40,7 +40,7 @@ class GameBoyCore {
         this.regs = new Uint8Array(8);
         this.PC = 0;
         this.SP = 0;
-        this.MMU = new Memory(romData);
+        this.MMU = new Memory(this, romData);
         this.IOhandler = new IOManager(this);
 
         this.flags = {
@@ -49,6 +49,11 @@ class GameBoyCore {
             H: 0,
             C: 0,
         }
+
+        this.AF = 0x0100;
+        this.BC = 0xFF13;
+        this.DE = 0x00C1;
+        this.HL = 0x8403;
 
         // used for lazy stepping
         this.bufferedCycles = 0;
@@ -187,8 +192,15 @@ class GameBoyCore {
         return this.interruptFlag == 1 && ((this.IEreg & this.IFreg) > 0);
     }
 
-    stepSingle() {
+    incrCycleCounter(amount = 1){
+        this.bufferedCycles += this.cyclesPerTick * amount;
+    }
 
+    stepSingle() {
+        if(this.pollScheduler()){
+            this.runAllCachedCycles();
+            debugger;
+        }
         if(this.checkForInterrupts()){
             let interruptTester = this.IEreg & this.IFreg;
             let lowestInterruptBit = ctz32(interruptTester);
@@ -208,6 +220,15 @@ class GameBoyCore {
         }
         f();
     }
+
+    cyclesUntilNextEvent(){
+        return this.IOhandler.scheduler.timeUntilNext - this.bufferedCycles
+    }
+
+    pollScheduler(){
+        return this.cyclesUntilNextEvent() <= 0;
+    }
+
     #createFunctionArray() {
         const getRegFromIndex =
             (/** @type {number} */ index) => {

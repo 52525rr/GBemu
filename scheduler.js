@@ -1,6 +1,6 @@
 //@ts-check
 "use strict"
-/**@typedef {{event: number, timestamp: number}} SchedulerEvent */
+/**@typedef {{event: number, timestamp: number, timestampAdded: number}} SchedulerEvent */
 
 class Scheduler{
     /**
@@ -27,7 +27,7 @@ class Scheduler{
      * @param {number} event
      */
     addEventAbsolute(timestamp, event){
-        const obj = { timestamp, event };
+        const obj = { timestamp, event, timestampAdded: this.cycleCount };
         let spliceIndex = 0;
         for (let i = 0; i < this.#eventList.length; i++) {
             spliceIndex = i;
@@ -41,8 +41,13 @@ class Scheduler{
      * @param {number} timestampPlus
      * @param {number} event
      */
-    addEventRelative(timestampPlus, event){
+    addEventOffset(timestampPlus, event){
+        const currentEventTime = this.#eventList[0]?.timestamp ?? this.cycleCount;
+        this.addEventAbsolute(currentEventTime + timestampPlus, event);
+    }
 
+    get timeUntilNext(){
+        return (this.#eventList[0]?.timestamp ?? Infinity) - this.cycleCount;
     }
 }
 

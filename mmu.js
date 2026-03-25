@@ -1,4 +1,6 @@
 //@ts-check
+import { GameBoyCore } from "./cpu.js";
+import { IO_LABELS } from "./io.js";
 import { decodeCartHeader, MAPPERS, createMapperCallbackBinding } from "./mappers.js";
 
 "use strict"
@@ -13,13 +15,22 @@ function assertRomSize(romData){
     }
 }
 
+/**
+ * @param {number} addr
+ */
+function isUnsafeAddress(addr){
+    return addr >= 0xFF00 && addr <= 0xFF7F;
+}
+
 class Memory{
     /**
      * @param {Uint8Array} romFile
      * @param {boolean} isGBC
+     * @param {GameBoyCore} cpuInstance
      */
-    constructor(romFile, isGBC = false){
+    constructor(cpuInstance, romFile, isGBC = false){
         this.serialOutput = "";
+        this.cpu = cpuInstance;
 
         assertRomSize(romFile);
         this.ROM  = new Uint8Array(romFile);
@@ -101,12 +112,31 @@ class Memory{
         }
     }
 
-    
+    /**
+     * @param {number} addr
+     * @param {number} byte
+     */
+    trapIOwrite(addr, byte){
+        const ioLower = addr & 0xFF;
+        const a = addr >> 8;
+        if(a !== 0xFF) return;
+
+        switch(ioLower){
+            case IO_LABELS.DIV:{
+                debugger;
+            }break;
+        }
+    }
 
     /**
      * @param {number} addr
      */
     loadByteMMU(addr){
+        this.cpu.incrCycleCounter();
+        if(isUnsafeAddress(addr)){
+            this.cpu.runAllCachedCycles();
+            
+        }
         return this.loadByteDirect(addr);
     }
 
@@ -115,7 +145,10 @@ class Memory{
      * @param {number} byte
      */
     storeByteMMU(addr, byte){
+        this.cpu.incrCycleCounter();
+        if(isUnsafeAddress(addr)) this.cpu.runAllCachedCycles();
         this.storeByteDirect(addr, byte);
+        this.trapIOwrite(addr, byte);
     }
 }
 
