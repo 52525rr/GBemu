@@ -29,6 +29,14 @@ const FLAG_SHIFTS = Object.freeze({
     C: 4,
 })
 
+const INTERRUPT_SOURCES = Object.freeze({
+    VBLANK: 0,
+    STAT: 1,
+    TIMER: 2,
+    SERIAL: 3,
+    JOYPAD: 4,
+})
+
 const asUint16 = (/** @type {number} */ n) => n & 0xFFFF;
 const asInt8   = (/** @type {number} */ n) => (n << 24) >> 24;
 
@@ -42,6 +50,7 @@ class GameBoyCore {
         this.SP = 0;
         this.MMU = new Memory(this, romData);
         this.IOhandler = new IOManager(this);
+        this.halted = false;
 
         this.flags = {
             Z: 0,
@@ -184,12 +193,12 @@ class GameBoyCore {
     }
 
     runAllCachedCycles(){
-        this.IOhandler.tick(this.bufferedCycles);
+        this.IOhandler.step(this.bufferedCycles);
         this.bufferedCycles = 0;
     }
 
     checkForInterrupts(){
-        return this.interruptFlag == 1 && ((this.IEreg & this.IFreg) > 0);
+        return this.interruptFlag == 1 && ((this.IEreg & this.IFreg) !== 0);
     }
 
     incrCycleCounter(amount = 1){
@@ -197,14 +206,20 @@ class GameBoyCore {
     }
 
     stepSingle() {
+        if(this.halted){
+            this.haltSkip();
+            return;
+        }
+
         if(this.pollScheduler()){
             this.runAllCachedCycles();
-            debugger;
         }
+
         if(this.checkForInterrupts()){
             let interruptTester = this.IEreg & this.IFreg;
             let lowestInterruptBit = ctz32(interruptTester);
             if(lowestInterruptBit > 4) return;
+
             let interruptTargetAddress = 0x40 + (lowestInterruptBit * 8);
             this.#executeInterrupt(interruptTargetAddress);
 
@@ -221,12 +236,27 @@ class GameBoyCore {
         f();
     }
 
-    cyclesUntilNextEvent(){
-        return this.IOhandler.scheduler.timeUntilNext - this.bufferedCycles
+    pollScheduler(){
+        return this.IOhandler.scheduler.timeUntilNext - this.bufferedCycles <= 0;
     }
 
-    pollScheduler(){
-        return this.cyclesUntilNextEvent() <= 0;
+    haltSkip(){
+        let skippedCycles = 0;
+        while(skippedCycles < 70000){
+            if((this.IEreg & this.IFreg) !== 0){
+                this.halted = false;
+                break;
+            }
+            const timeUntilNext = this.IOhandler.scheduler.timeUntilNext;
+            if(timeUntilNext == Infinity){
+                throw new Error("Halted with no scheduler events; Infinite halt");
+            }
+
+            skippedCycles += timeUntilNext;
+            this.bufferedCycles += timeUntilNext;
+
+            this.runAllCachedCycles();
+        }
     }
 
     #createFunctionArray() {
@@ -316,6 +346,7 @@ class GameBoyCore {
                     }
                 }
             }
+
         const RETI = () => {
             POP_R16("PC");
             this.interruptFlag = 1;
@@ -716,6 +747,10 @@ class GameBoyCore {
             this[t] = asUint16(R);
         }
 
+        const HALT = () => {
+            this.halted = true;
+        }
+
         /**
          * @type {Array<Function | null>}
          */
@@ -860,7 +895,7 @@ class GameBoyCore {
         v[0x73] = LOAD_REG_REG(REGS.HL_DEREF, REGS.E);
         v[0x74] = LOAD_REG_REG(REGS.HL_DEREF, REGS.H);
         v[0x75] = LOAD_REG_REG(REGS.HL_DEREF, REGS.L);
-        v[0x76] = null // HALT
+        // skipped bc HALT instruction
         v[0x77] = LOAD_REG_REG(REGS.HL_DEREF, REGS.A);
         v[0x78] = LOAD_REG_REG(REGS.A, REGS.B);
         v[0x79] = LOAD_REG_REG(REGS.A, REGS.C);
@@ -1004,6 +1039,7 @@ class GameBoyCore {
         v[0xF8] = ADD_R16_SP_I8.bind(this, "HL");
 
         v[0x00] = () => 0; // NOP
+        v[0x76] = HALT;
 
         return v;
     }
@@ -1040,4 +1076,4 @@ function _run(cpuInstance) {
     }
 }
 
-export { _init, GameBoyCore }
+export { _init, GameBoyCore, INTERRUPT_SOURCES }

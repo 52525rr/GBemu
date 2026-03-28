@@ -9,8 +9,8 @@ class Scheduler{
     #eventList;
     
     constructor(){
-        this.cycleCount = 0;
-        this.totalCycleCount = 0n;
+        this.count = 0;
+        this.totalCount = 0n;
         
         this.#eventList = [];
     }
@@ -19,7 +19,7 @@ class Scheduler{
      * @param {number} count
      */
     advance(count){
-        this.cycleCount += count;
+        this.count += count;
     }
 
     /**
@@ -27,7 +27,7 @@ class Scheduler{
      * @param {number} event
      */
     addEventAbsolute(timestamp, event){
-        const obj = { timestamp, event, timestampAdded: this.cycleCount };
+        const obj = { timestamp, event, timestampAdded: this.count };
         let spliceIndex = 0;
         for (let i = 0; i < this.#eventList.length; i++) {
             spliceIndex = i;
@@ -42,12 +42,41 @@ class Scheduler{
      * @param {number} event
      */
     addEventOffset(timestampPlus, event){
-        const currentEventTime = this.#eventList[0]?.timestamp ?? this.cycleCount;
+        const currentEventTime = this.#eventList[0]?.timestamp ?? this.count;
         this.addEventAbsolute(currentEventTime + timestampPlus, event);
     }
 
     get timeUntilNext(){
-        return (this.#eventList[0]?.timestamp ?? Infinity) - this.cycleCount;
+        return (this.#eventList[0]?.timestamp ?? Infinity) - this.count;
+    }
+
+    peekNextEvent(){
+        return this.#eventList[0];
+    }
+
+    removeNextEvent(){
+        return this.#eventList.shift();
+    }
+
+    /**
+     * @param {number} timestampPlus
+     * @param {number} event
+     */
+    reschedule(timestampPlus, event){
+        this.removeFirstWithEventID(event);
+        this.addEventOffset(timestampPlus, event);
+    }
+
+    /**
+     * @param {number} targetEvent
+     */
+    removeFirstWithEventID(targetEvent){
+        for(let i in this.#eventList){
+            if(this.#eventList[i].event === targetEvent){
+                this.#eventList.splice(+i, 1);
+                return;
+            }
+        }
     }
 }
 

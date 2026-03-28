@@ -31,6 +31,7 @@ class Memory{
     constructor(cpuInstance, romFile, isGBC = false){
         this.serialOutput = "";
         this.cpu = cpuInstance;
+        this.ioAccessor = cpuInstance.IOhandler
 
         assertRomSize(romFile);
         this.ROM  = new Uint8Array(romFile);
@@ -114,22 +115,6 @@ class Memory{
 
     /**
      * @param {number} addr
-     * @param {number} byte
-     */
-    trapIOwrite(addr, byte){
-        const ioLower = addr & 0xFF;
-        const a = addr >> 8;
-        if(a !== 0xFF) return;
-
-        switch(ioLower){
-            case IO_LABELS.DIV:{
-                debugger;
-            }break;
-        }
-    }
-
-    /**
-     * @param {number} addr
      */
     loadByteMMU(addr){
         this.cpu.incrCycleCounter();
@@ -148,7 +133,8 @@ class Memory{
         this.cpu.incrCycleCounter();
         if(isUnsafeAddress(addr)) this.cpu.runAllCachedCycles();
         this.storeByteDirect(addr, byte);
-        this.trapIOwrite(addr, byte);
+        this.cpu.IOhandler.trapIOwrite(addr, byte);
+        
     }
 }
 

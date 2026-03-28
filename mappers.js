@@ -97,7 +97,7 @@ const createMapperCallbackBinding = (/** @type {Memory} */ memoryInstance) => ({
             const bankCount = memoryInstance.CART_DATA.bankCount;
 
             let selectedBank = value & 0x1F;
-            if(selectedBank == 0) selectedBank = 1;
+            if(selectedBank === 0) selectedBank = 1;
             selectedBank %= bankCount;
 
             memoryInstance.romBank = selectedBank;
@@ -157,7 +157,7 @@ const createMapperCallbackBinding = (/** @type {Memory} */ memoryInstance) => ({
 function decodeCartHeader(romData){    
     return {
         MBC:        getMBC(romData[0x0147]),
-        bankCount:  getBankCount(romData[0x148])
+        bankCount:  getBankCount(romData[0x0148])
     }
 }
 
