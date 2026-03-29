@@ -120,7 +120,9 @@ class Memory{
         this.cpu.incrCycleCounter();
         if(isUnsafeAddress(addr)){
             this.cpu.runAllCachedCycles();
-            
+        }
+        if(addr === 0xFF0F){
+            //debugger;
         }
         return this.loadByteDirect(addr);
     }
@@ -131,7 +133,9 @@ class Memory{
      */
     storeByteMMU(addr, byte){
         this.cpu.incrCycleCounter();
-        if(isUnsafeAddress(addr)) this.cpu.runAllCachedCycles();
+        if(isUnsafeAddress(addr)){
+            this.cpu.runAllCachedCycles();
+        }
         this.storeByteDirect(addr, byte);
         this.cpu.IOhandler.trapIOwrite(addr, byte);
         

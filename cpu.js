@@ -170,7 +170,7 @@ class GameBoyCore {
 
     #loadI8fromPC() {
         const a = this.#readAndIncrPC();
-        return (a << 24) >> 24;
+        return asInt8(a);
     }
 
     #loadU16fromPC() {
@@ -183,13 +183,15 @@ class GameBoyCore {
      * @param {number} targetAddress
      */
     #executeInterrupt(targetAddress){
-        // 2 M cycles of nothing;
+        this.incrCycleCounter(2);
+
         let r = this.PC;
         this.SP = asUint16(this.SP - 1);
         this.MMU.storeByteMMU(this.SP, r >>> 8 & 0xFF);
         this.SP = asUint16(this.SP - 1);
         this.MMU.storeByteMMU(this.SP, r >>> 0 & 0xFF);
         this.PC = targetAddress;
+        this.incrCycleCounter(1);
     }
 
     runAllCachedCycles(){
@@ -198,7 +200,7 @@ class GameBoyCore {
     }
 
     checkForInterrupts(){
-        return this.interruptFlag == 1 && ((this.IEreg & this.IFreg) !== 0);
+        return this.interruptFlag == 1 && (this.IEreg & this.IFreg) !== 0;
     }
 
     incrCycleCounter(amount = 1){
@@ -304,11 +306,14 @@ class GameBoyCore {
                     const jumpAddr = this.#loadU16fromPC();
                     if (unconditional || this.flags[flag] === expectedValue) {
                         this.PC = jumpAddr;
+                        this.incrCycleCounter(1);
                     }
                 }
             }
 
         const PUSH_R16 = (/** @type {REG16} */ t, includeInternal = false) => {
+            this.incrCycleCounter(1);
+
             const r = this[t];
             this.SP = asUint16(this.SP - 1);
             this.MMU.storeByteMMU(this.SP, r >>> 8 & 0xFF);
@@ -341,14 +346,17 @@ class GameBoyCore {
         const RET =
             (/** @type {boolean} */ unconditional, /** @type {FLAG} */ flag, /** @type {0 | 1} */ expectedValue) => {
                 return () => {
+                    this.incrCycleCounter(unconditional ? 0 : 1);
                     if (unconditional || this.flags[flag] === expectedValue) {
                         POP_R16("PC");
+                        this.incrCycleCounter(1);
                     }
                 }
             }
 
         const RETI = () => {
             POP_R16("PC");
+            this.incrCycleCounter(1);
             this.interruptFlag = 1;
         }
         
@@ -359,6 +367,7 @@ class GameBoyCore {
                     const jumpAddr = this.#loadI8fromPC();
                     if (unconditional || this.flags[flag] === expectedValue) {
                         this.PC = asUint16(this.PC + jumpAddr);
+                        this.incrCycleCounter();
                     }
                 }
             }
@@ -495,8 +504,8 @@ class GameBoyCore {
 
         const ADDTO_R16 = ( /** @type {REG16} */ t, /** @type {number} */ amount) => {
             return () => {
-                // internal cycle?
                 this[t] = asUint16(this[t] + amount);
+                this.incrCycleCounter();
             }
         }
 
@@ -526,6 +535,7 @@ class GameBoyCore {
                 flags.H = +(Htest > 0xFFF);
                 flags.C = +(R > 0xFFFF);
                 this.HL = asUint16(R);
+                this.incrCycleCounter();
             }
         }
         const ADDTO_REG = (/** @type {number} */ regIndex, /** @type {number} */ B) => {
@@ -725,6 +735,7 @@ class GameBoyCore {
 
         const LOAD_SP_HL = () => {
             this.SP = this.HL;
+            this.incrCycleCounter();
         }
 
         const RST = (/** @type {number} */ addr) => {
@@ -732,7 +743,7 @@ class GameBoyCore {
             this.PC = addr;
         }
 
-        const ADD_R16_SP_I8 = (/** @type {REG16} */ t) => {
+        const ADD_R16_SP_I8 = (/** @type {REG16} */ t, extraCycles = 0) => {
             const flags = this.flags;
             const A = this.SP;
             const B = this.#loadI8fromPC();
@@ -745,6 +756,7 @@ class GameBoyCore {
             flags.C = +(Ctest > 0xFF);
             flags.Z = 0;
             this[t] = asUint16(R);
+            this.incrCycleCounter(extraCycles);
         }
 
         const HALT = () => {
@@ -1035,8 +1047,8 @@ class GameBoyCore {
         v[0xF7] = RST.bind(this, 0x30);
         v[0xFF] = RST.bind(this, 0x38);
 
-        v[0xE8] = ADD_R16_SP_I8.bind(this, "SP");
-        v[0xF8] = ADD_R16_SP_I8.bind(this, "HL");
+        v[0xE8] = ADD_R16_SP_I8.bind(this, "SP", 2);
+        v[0xF8] = ADD_R16_SP_I8.bind(this, "HL", 1);
 
         v[0x00] = () => 0; // NOP
         v[0x76] = HALT;

@@ -26,9 +26,12 @@ class Scheduler{
      * @param {number} timestamp
      * @param {number} event
      */
-    addEventAbsolute(timestamp, event){
-        const obj = { timestamp, event, timestampAdded: this.count };
-        let spliceIndex = 0;
+    addEventAbsolute(timestamp, event, timestampAdded = this.count){
+        if(timestamp === 1421272){
+            debugger;
+        }
+        const obj = { timestamp, event, timestampAdded };
+        let spliceIndex = this.#eventList.length;
         for (let i = 0; i < this.#eventList.length; i++) {
             spliceIndex = i;
             const element = this.#eventList[i];
@@ -42,7 +45,8 @@ class Scheduler{
      * @param {number} event
      */
     addEventOffset(timestampPlus, event){
-        const currentEventTime = this.#eventList[0]?.timestamp ?? this.count;
+        const currentEventTime = this.count;
+
         this.addEventAbsolute(currentEventTime + timestampPlus, event);
     }
 
@@ -62,9 +66,17 @@ class Scheduler{
      * @param {number} timestampPlus
      * @param {number} event
      */
-    reschedule(timestampPlus, event){
-        this.removeFirstWithEventID(event);
-        this.addEventOffset(timestampPlus, event);
+    reschedule(timestampPlus, event, useEventTimestamp = false){
+        let e = this.removeFirstWithEventID(event);
+        
+        let t = useEventTimestamp ? e?.timestamp : this.count;
+        t ??= this.count;
+
+        let newTimestamp = t + timestampPlus;
+
+        if(newTimestamp < Infinity){
+            this.addEventAbsolute(newTimestamp, event);
+        }
     }
 
     /**
@@ -72,9 +84,10 @@ class Scheduler{
      */
     removeFirstWithEventID(targetEvent){
         for(let i in this.#eventList){
-            if(this.#eventList[i].event === targetEvent){
+            const e = this.#eventList[i];
+            if(e.event === targetEvent){
                 this.#eventList.splice(+i, 1);
-                return;
+                return e;
             }
         }
     }

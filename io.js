@@ -36,28 +36,31 @@ class IOManager{
      */
     step(ticks){
         const Mcycles = ticks / this.cpu.cyclesPerTick;
-
         this.scheduler.advance(ticks);
 
+        
         this.#updateTimer(Mcycles);
         this.checkSchedulerEvents();
     }
 
     checkSchedulerEvents(){
         while(this.scheduler.timeUntilNext <= 0){
-            const E = this.scheduler.peekNextEvent();
+            const E = this.scheduler.removeNextEvent();
+            if(E == undefined){
+                break;
+            }
 
             switch(E.event){
                 case SCHEDULER_EVENTS.TIMA_INTERRUPT:{
-                    // do nothing
-                    // this event only exists to make sure that the stepper runs before a TIMA interrupt fires.
+                    this.cpu.IFreg |= 1 << INTERRUPT_SOURCES.TIMER;
+                    this.#rescheduleTIMAevent(true);
+                    //debugger;
                 }break;
 
                 default:{
                     debugger
                 }break;
             }
-            this.scheduler.removeNextEvent();
         }
     }
 
@@ -77,6 +80,7 @@ class IOManager{
             }break;
 
             case IO_LABELS.TIMA:{
+                //debugger
                 this.#rescheduleTIMAevent();
             }break;
 
@@ -96,12 +100,12 @@ class IOManager{
         return 4 ** TIMAspeed; // 4, 16, 64, or 256 M cycles
     }
 
-    #rescheduleTIMAevent(){
+    #rescheduleTIMAevent(useEventTimestamp = false){
         // DIV should be up to date when this is called
         const TIMAenabled = this.TAC >> 2 & 1;
-        this.scheduler.removeFirstWithEventID(SCHEDULER_EVENTS.TIMA_INTERRUPT);
 
         if(!TIMAenabled){
+            this.scheduler.reschedule(Infinity, SCHEDULER_EVENTS.TIMA_INTERRUPT);
             return;
         }
         let untilOverflow = 0xFF - this.TIMA;
@@ -111,7 +115,8 @@ class IOManager{
 
         let ticksUntilInterrupt = (DIVclocked + untilOverflow*TIMAspeed) * this.cpu.cyclesPerTick;
 
-        this.scheduler.addEventOffset(ticksUntilInterrupt, SCHEDULER_EVENTS.TIMA_INTERRUPT);
+        this.scheduler.reschedule(ticksUntilInterrupt, SCHEDULER_EVENTS.TIMA_INTERRUPT, useEventTimestamp);
+        //debugger
     }
 
     /**
@@ -125,13 +130,14 @@ class IOManager{
             this.DIV += 1;
 
             if(TIMAenabled && this.DIV % TIMAspeed === 0){
-                let TIMA = this.TIMA;
+                let TIMAold = this.TIMA;
                 this.TIMA++;
-                //console.log(`TIMA is now ${TIMA}`);
+                //console.log(`TIMA is now ${TIMAold}`);
 
-                if(TIMA + 1 >= 0x100){
+                if(TIMAold + 1 > 0xFF){
                     this.TIMA = this.TMA;
-                    this.cpu.IFreg |= 1 << INTERRUPT_SOURCES.TIMER;
+
+                    //debugger;
                 }
             }
         }
