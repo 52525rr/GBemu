@@ -5,9 +5,10 @@
  */
 "use strict"
 
-import { IOManager } from "./io.js";
+import { GameBoyVideoCanvas } from "./framebufferReader.js";
+import { IO_LABELS, IOManager } from "./io.js";
 import { Memory } from "./mmu.js";
-import { ctz32 } from "./util.js";
+import { ctz32, sleep } from "./util.js";
 
 const REGS = Object.freeze({
     B: 0,
@@ -36,6 +37,8 @@ const INTERRUPT_SOURCES = Object.freeze({
     SERIAL: 3,
     JOYPAD: 4,
 })
+
+const CYCLES_PER_FRAME = 1e6;
 
 const asUint16 = (/** @type {number} */ n) => n & 0xFFFF;
 const asInt8   = (/** @type {number} */ n) => (n << 24) >> 24;
@@ -71,6 +74,9 @@ class GameBoyCore {
 
         this.cpuSpeed = 1;
         this.cyclesPerTick = 4;
+
+        this.frameCycles = 0;
+        this.#initIOregs();
     }
 
     get BC() {
@@ -126,6 +132,11 @@ class GameBoyCore {
     }
     set IFreg(v){
         this.MMU.IO[0x0F] = v;
+    }
+
+    #initIOregs(){
+        this.MMU.writeIOreg(IO_LABELS.BGP,  0b11100100);
+        this.MMU.writeIOreg(IO_LABELS.LCDC, 0b10010001);
     }
 
     resetCPU() {
@@ -204,7 +215,15 @@ class GameBoyCore {
     }
 
     incrCycleCounter(amount = 1){
-        this.bufferedCycles += this.cyclesPerTick * amount;
+        this.incrCycleCounterByTicks(amount * this.cyclesPerTick);
+    }
+
+    /**
+     * @param {number} amount
+     */
+    incrCycleCounterByTicks(amount){
+        this.bufferedCycles += amount;
+        this.frameCycles += amount;
     }
 
     stepSingle() {
@@ -213,7 +232,7 @@ class GameBoyCore {
             return;
         }
 
-        if(this.pollScheduler()){
+        if(this.pollScheduler() || this.bufferedCycles >= 10000){
             this.runAllCachedCycles();
         }
 
@@ -243,6 +262,8 @@ class GameBoyCore {
     }
 
     haltSkip(){
+        this.runAllCachedCycles();
+
         let skippedCycles = 0;
         while(skippedCycles < 70000){
             if((this.IEreg & this.IFreg) !== 0){
@@ -255,7 +276,7 @@ class GameBoyCore {
             }
 
             skippedCycles += timeUntilNext;
-            this.bufferedCycles += timeUntilNext;
+            this.incrCycleCounterByTicks(timeUntilNext);
 
             this.runAllCachedCycles();
         }
@@ -1077,14 +1098,24 @@ function _init(romData) {
 /**
  * @param {GameBoyCore} cpuInstance
  */
-function _run(cpuInstance) {
+async function _run(cpuInstance) {
+    const videoSource = new GameBoyVideoCanvas("canvas");
+    const text = document.getElementById("A");
+
     cpuInstance.resetCPU();
     while(1){
-        for (let i = 0; i < 3e7; i++) {
+        while(cpuInstance.frameCycles < CYCLES_PER_FRAME){
             cpuInstance.stepSingle();
         }
+        cpuInstance.frameCycles -= CYCLES_PER_FRAME;
+
+        videoSource.copyBuffer(cpuInstance.IOhandler.PPU.framebuffer);
+        videoSource.updateImage();
+        //@ts-ignore
+        text.innerText = `cycles ran: ${cpuInstance.IOhandler.scheduler.count}`;
+
         debugger;
-        break;
+        await sleep(1);
     }
 }
 

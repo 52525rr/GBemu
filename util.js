@@ -16,4 +16,6 @@ const ctz32 = (x) => {
     return x ? 31 - Math.clz32(x & -x) : 32;
 }
 
-export { sleep, littleEndian, ctz32 }
+const mod = (a, b) => a % b + (a / b < 0 ? b : 0);
+
+export { sleep, littleEndian, ctz32, mod }

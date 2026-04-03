@@ -27,15 +27,15 @@ class Scheduler{
      * @param {number} event
      */
     addEventAbsolute(timestamp, event, timestampAdded = this.count){
-        if(timestamp === 1421272){
-            debugger;
-        }
         const obj = { timestamp, event, timestampAdded };
         let spliceIndex = this.#eventList.length;
+
         for (let i = 0; i < this.#eventList.length; i++) {
-            spliceIndex = i;
             const element = this.#eventList[i];
-            if(timestamp < element.timestamp) break;
+            if(timestamp < element.timestamp){
+                spliceIndex = i;
+                break;
+            };
         }
         this.#eventList.splice(spliceIndex, 0, obj);
     }
@@ -70,7 +70,7 @@ class Scheduler{
         let e = this.removeFirstWithEventID(event);
         
         let t = useEventTimestamp ? e?.timestamp : this.count;
-        t ??= this.count;
+        t ??= this.count; // if there were no events with the cooresponding event ID before, just use the current scheduler timestamp instead
 
         let newTimestamp = t + timestampPlus;
 

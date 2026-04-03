@@ -1,24 +1,60 @@
+//@ts-check
+
 "use strict"
 
-const screen = document.getElementById("canvas2");
-const screenCTX = screen.getContext("2d", {willReadFrequently: true});
+const WIDTH = 160;
+const HEIGHT = 144;
 
-const WIDTH = screen.width ?? 160;
-const HEIGHT = screen.height ?? 144;
+/**
+ * @param {number} n
+ * @param {number[]} color
+ */
 
-let imageData = screenCTX.createImageData(WIDTH, HEIGHT)
-let imageDataBuffer = imageData.data
 
-function setPixel(n, color){
-    let i = (n)*4;
-    imageDataBuffer[i++] = color[0]
-    imageDataBuffer[i++] = color[1]
-    imageDataBuffer[i++] = color[2]
-    imageDataBuffer[i++] = 255
+class GameBoyVideoCanvas{
+    /**
+     * @param {string} elementID
+     */
+    constructor(elementID){
+        /**
+         * @type {HTMLCanvasElement}
+         */
+        // @ts-ignore
+        this.screen = document.getElementById(elementID);
+
+        this.screenCTX = this.screen?.getContext("2d", {willReadFrequently: true});
+        if(this.screenCTX === null){
+            throw new Error("cannot create canvas element");
+        }
+
+        this.imageData = this.screenCTX.createImageData(WIDTH, HEIGHT);
+        this.imageDataBuffer = this.imageData.data;
+    }
+
+    /**
+    * @param {number} n
+    * @param {number[]} color
+     */
+    setPixel(n, color){
+        let i = n*4;
+        this.imageDataBuffer[i++] = color[0];
+        this.imageDataBuffer[i++] = color[1];
+        this.imageDataBuffer[i++] = color[2];
+        this.imageDataBuffer[i++] = 255;
+    }
+
+    /**
+     * @param {Uint8ClampedArray} buffer
+     */
+    copyBuffer(buffer){
+        for(let i = 0; i < buffer.length; i++){
+            this.imageDataBuffer[i] = buffer[i];
+        }
+    }
+
+    updateImage(){
+        this.screenCTX.putImageData(this.imageData, 0, 0);
+    }
 }
 
-function updateImage(){
-    screenCTX.putImageData(imageData, 0, 0)
-}
-
-export { setPixel, updateImage }
+export { GameBoyVideoCanvas }

@@ -133,12 +133,24 @@ class Memory{
      */
     storeByteMMU(addr, byte){
         this.cpu.incrCycleCounter();
+
         if(isUnsafeAddress(addr)){
             this.cpu.runAllCachedCycles();
         }
+        
         this.storeByteDirect(addr, byte);
         this.cpu.IOhandler.trapIOwrite(addr, byte);
         
+    }
+
+    /**
+     * @param {number} addr
+     * @param {number} byte
+     */
+    writeIOreg(addr, byte){
+        addr |= 0xFF00;
+        this.storeByteDirect(addr, byte);
+        this.cpu.IOhandler.trapIOwrite(addr, byte);
     }
 }
 
