@@ -1,6 +1,11 @@
 // @ts-check
+/**
+ * @typedef {{x: number, y: number, index: number, attributes: number, oamIndex: number}} Sprite
+ */
+
 import { INTERRUPT_SOURCES } from "./cpu.js";
 import { IO_LABELS, SCHEDULER_EVENTS, LCD_START_TIME, LCD_END_TIME, IOManager } from "./io.js";
+import { bitReverse8 } from "./util.js";
 
 "use strict"
 
@@ -42,9 +47,17 @@ const DMG_PALETTE = [
 ]
 
 class PPU {
-    #prevLineCycles;
     #windowIncr;
     #prevStatSignal;
+    #shadowLY;
+
+    /**
+     * @type {{
+     * spriteBuffer: (number | undefined)[] | undefined, 
+     * spriteAttributeBuffer: (number | undefined)[] | undefined
+     * }}
+     */
+    #spriteInfo;
 
     /**
      * @param {IOManager} io
@@ -58,14 +71,19 @@ class PPU {
         this.LY = 0;
         this.LX = 0;
         this.WLY = 0;
+        this.#shadowLY = 0;
 
         this.LCDenabled = false;
         this.framebuffer = new Uint8ClampedArray(SCREEN_HEIGHT * SCREEN_WIDTH * BYTES_PER_PIXEL);
         this.PPUmode = 0;
         this.lineCycles = 0;
-        this.#prevLineCycles = 0;
         this.#windowIncr = false;
         this.#prevStatSignal = 0;
+        
+        this.#spriteInfo = {
+            spriteBuffer: undefined,
+            spriteAttributeBuffer: undefined,
+        }
 
         this.FIFOpenalty = 0;
     }
@@ -76,7 +94,6 @@ class PPU {
         this.LCDenabled = false;
         this.PPUmode = 0;
         this.lineCycles = 0;
-        this.#prevLineCycles = 0;
         this.FIFOpenalty = 0;
         this.#windowIncr = false;
         this.#prevStatSignal = 0;
@@ -185,6 +202,15 @@ class PPU {
             let [, nextPPUMode] = cyclesUntilNextInterestingThing(futureLineTime, this.LY);
             this.PPUmode = nextPPUMode;
 
+            if(currentPPUMode != nextPPUMode){
+                if(currentPPUMode == PPU_MODES.OAM_SCAN){
+                    let spriteList = this.#calculateSprites(this.LY);
+                    let a = this.#createSpriteOverlay(spriteList, this.LY);
+                    this.#spriteInfo.spriteBuffer = a.spriteBuffer;
+                    this.#spriteInfo.spriteAttributeBuffer = a.spriteAttributeBuffer;
+                }
+            }
+
             if(nextPPUMode === PPU_MODES.RENDERING){
                 this.drawPixels(batchedCycles);
             }
@@ -203,9 +229,137 @@ class PPU {
     }
 
     /**
+     * @param {number} LY
+     */
+    #calculateSprites(LY){
+        const OAM = this.mem.OAM;
+        const LCDC = this.ioRegs[IO_LABELS.LCDC];
+        const spriteHeight = (LCDC >> 2 & 1) ? 16 : 8;
+
+        /**
+         * @type {Sprite[]}
+         */
+        let spriteList = [];
+
+        for(let i = 0; i < 40; i++){
+            let OAMindex = i * 4;
+            
+            const spriteY = OAM[OAMindex + 0] - 16;
+            const spriteX = OAM[OAMindex + 1] - 8;
+            const spriteIndex = OAM[OAMindex + 2];
+            const spriteAttributes = OAM[OAMindex + 3];
+
+            if(LY >= spriteY && LY < spriteY + spriteHeight){
+                spriteList.push({
+                    x: spriteX,
+                    y: spriteY,
+                    index: spriteIndex,
+                    attributes: spriteAttributes,
+                    oamIndex: i
+                })
+            }
+
+            if(spriteList.length >= 10){
+                break;
+            }
+        }
+
+        if(true){ 
+            spriteList.sort((a, b) => {
+                // DMG mode, sprites sorted by X position
+                let r = b.x - a.x;
+                if(r !== 0) return r;
+                r = b.oamIndex - a.oamIndex;
+                return r;
+            })
+        }
+
+        if(spriteList.length > 0){
+            debugger
+        }
+
+        return spriteList;
+    }
+
+    /**
+     * @param {Sprite[]} spriteList
+     * @param {number} LY 
+     * 
+     * @returns {{
+     * spriteBuffer: (number | undefined)[], 
+     * spriteAttributeBuffer: (number | undefined)[]
+     * }}
+     */
+    #createSpriteOverlay(spriteList, LY){
+        // creates a buffer and writes sprite pixels to it ahead of time
+        // this makes the pixel renderer's job a lot easier
+
+        const LCDC = this.ioRegs[IO_LABELS.LCDC];
+        const spriteHeight = (LCDC >> 2 & 1) ? 16 : 8;
+
+        const spriteBuffer = new Array(SCREEN_WIDTH).fill(undefined);
+        const spriteAttributeBuffer = new Array(SCREEN_WIDTH).fill(undefined);
+
+        let tileBasePointer = 0x0000; // start of VRAM or add  0x8000
+
+        for(let sprite of spriteList){
+            let { x, y, index, attributes } = sprite;
+
+            const yFlip = attributes >> 6 & 1;
+            const xFlip = attributes >> 5 & 1;
+
+            let spriteLine = LY - y;
+
+            if(yFlip){
+                spriteLine = (spriteHeight - 1) - spriteLine;
+            }
+            if(spriteHeight == 16){
+                index &= ~0b01;
+                if(spriteLine >= 8){
+                    index |= 0b01;
+                }
+            }
+
+            let spriteDataIndex = (index * 8 + spriteLine % 8) * 2;
+
+            let tilePlane0 = this.VRAM[tileBasePointer + spriteDataIndex + 0];
+            let tilePlane1 = this.VRAM[tileBasePointer + spriteDataIndex + 1];
+
+            if(xFlip){
+                tilePlane0 = bitReverse8(tilePlane0);
+                tilePlane1 = bitReverse8(tilePlane1);
+            }
+
+            for(let i = 0; i < 8; i++){
+                let bufferIndex = x + i;
+                let pixelShiftAmount = 7 - i;
+
+                let pix = (tilePlane0 >> pixelShiftAmount & 1) + 2*(tilePlane1 >> pixelShiftAmount & 1);
+
+                if(bufferIndex >= 0 && bufferIndex <= SCREEN_WIDTH){
+                    spriteBuffer[bufferIndex] = pix;
+                    spriteAttributeBuffer[bufferIndex] = attributes;
+                }
+            }
+
+        }
+
+        return { spriteBuffer, spriteAttributeBuffer }
+    }
+
+    /**
      * @param {number} bufferedPixels
      */
     drawPixels(bufferedPixels){
+        const unpackDMGpalette = (/** @type {any} */ byte) => {
+            return [
+                byte >> 0 & 0b11,
+                byte >> 2 & 0b11,
+                byte >> 4 & 0b11,
+                byte >> 6 & 0b11,
+            ]
+        }
+
         const asInt8 = (/** @type {number} */ n) => (n << 24 >> 24);
 
         const LCDC = this.ioRegs[IO_LABELS.LCDC];
@@ -214,6 +368,8 @@ class PPU {
         const windowX  = this.ioRegs[IO_LABELS.WX] - 7;
         const windowY  = this.ioRegs[IO_LABELS.WY];
         const dmgPaletteMap = this.ioRegs[IO_LABELS.BGP];
+        const obj0PaletteMap = this.ioRegs[IO_LABELS.OBP0];
+        const obj1PaletteMap = this.ioRegs[IO_LABELS.OBP1];
 
         const tileAddressingMode = !Boolean(LCDC >> 4 & 1);
 
@@ -227,18 +383,23 @@ class PPU {
         const windowEnabled = Boolean(LCDC >> 5 & 1);
         const backgroundEnabled = Boolean(LCDC >> 0 & 1);
 
+        const spritesEnabled = Boolean(LCDC >> 1 & 1);
+
         const spriteHeight = (LCDC >> 2 & 1) ? 16 : 8;
 
         const tileBasePointer = tileAddressingMode ? 0x1000 : 0x0000;
         
         let tileMapBase = backgroundTileMapBase;
 
-        const paletteArray = [
-            dmgPaletteMap >> 0 & 0b11,
-            dmgPaletteMap >> 2 & 0b11,
-            dmgPaletteMap >> 4 & 0b11,
-            dmgPaletteMap >> 6 & 0b11,
-        ]
+        const paletteArray = unpackDMGpalette(dmgPaletteMap);
+        const obj0PaletteArray = unpackDMGpalette(obj0PaletteMap);
+        const obj1PaletteArray = unpackDMGpalette(obj1PaletteMap);
+
+        let {spriteBuffer, spriteAttributeBuffer} = this.#spriteInfo;
+
+        if(spriteBuffer === undefined || spriteAttributeBuffer === undefined){
+            throw new Error("sprite list is undefined");
+        }
 
         while(bufferedPixels-- > 0){
             if(this.LX >= 160){
@@ -258,6 +419,9 @@ class PPU {
                 screenY = this.LY + scrollY;
             }
 
+            /**
+             * @type {number}
+             */
             let palID;
 
             if(backgroundEnabled){
@@ -283,6 +447,22 @@ class PPU {
             }else{
                 palID = 0;
             }
+
+            let spritePalID = spriteBuffer?.[this.LX];
+            if(spritesEnabled && spritePalID !== undefined){
+                let attributes = spriteAttributeBuffer?.[this.LX] ?? 0;
+                let palette = attributes >> 4 & 1;
+                let spritePriority = attributes >> 7 & 1;
+
+                let objPal = palette ? obj1PaletteArray : obj0PaletteArray;
+
+                let spriteCanDrawOverBackground = spritePalID !== 0 && (spritePriority ? palID === 0 : true);
+
+                if(spriteCanDrawOverBackground){
+                    palID = objPal[spritePalID];
+                }
+            }
+
             let color = DMG_PALETTE[palID];
 
             setPixelOnFrameBuffer(

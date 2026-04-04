@@ -19,7 +19,8 @@ const IO_LABELS = Object.freeze({
     LYC:    0x45,
 
     BGP:    0x47,
-
+    OBP0:   0x48,
+    OBP1:   0x49,
     WY:     0x4A,
     WX:     0x4B,
 })
@@ -97,10 +98,6 @@ class IOManager{
                 
                 }break;
 
-                case SCHEDULER_EVENTS.LCD_MODE3:{
-                    
-                }break;
-
                 case SCHEDULER_EVENTS.LCD_MODE2:{
                     let nextEvent = modPlus(LCD_INTR_START.MODE2 - this.PPU.lineCycles, SCANLINE_LENGTH);
                     this.scheduler.reschedule(nextEvent, SCHEDULER_EVENTS.LCD_MODE2);
@@ -115,10 +112,6 @@ class IOManager{
                 default:{
                     debugger;
                 }break;
-            }
-
-            if(this.scheduler.timeUntilNext <= 0){
-                debugger;
             }
         }
     }
@@ -192,10 +185,8 @@ class IOManager{
         this.ppuEventsActive = true;
         this.PPU.enableLCD();
 
-
-        this.scheduler.reschedule(0, SCHEDULER_EVENTS.LCD_MODE2);
-
-        this.scheduler.reschedule(0, SCHEDULER_EVENTS.LCD_MODE0_START);
+        this.scheduler.addEventOffset(0, SCHEDULER_EVENTS.LCD_MODE2);
+        this.scheduler.addEventOffset(0, SCHEDULER_EVENTS.LCD_MODE0_START);
     }
 
     /**
