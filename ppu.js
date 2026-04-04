@@ -91,6 +91,7 @@ class PPU {
     resetLCD(){
         this.LY = 0;
         this.LX = 0;
+        this.#shadowLY = 0;
         this.LCDenabled = false;
         this.PPUmode = 0;
         this.lineCycles = 0;

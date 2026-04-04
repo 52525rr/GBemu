@@ -1,4 +1,4 @@
-import { _init } from "./cpu.js"
+import { _init } from "./main.js"
 
 "use strict"
 
