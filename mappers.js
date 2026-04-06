@@ -101,7 +101,6 @@ const createMapperCallbackBinding = (/** @type {Memory} */ memoryInstance) => ({
             selectedBank %= bankCount;
 
             memoryInstance.romBank = selectedBank;
-            console.log(`bank switch val = ${value}, bank = ${selectedBank}`)
         }
     },
 

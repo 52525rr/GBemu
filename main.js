@@ -4,9 +4,9 @@
 
 import { GameBoyCore } from "./cpu.js";
 import { GameBoyVideoCanvas } from "./framebufferReader.js";
-import { ctz32, sleep } from "./util.js";
+import { sleep } from "./util.js";
 
-const CYCLES_PER_FRAME = 1e6;
+const CYCLES_PER_FRAME = 70224;
 
 /**
  * @param {Uint8Array} romData
@@ -37,7 +37,7 @@ async function _run(cpuInstance) {
         //@ts-ignore
         text.innerText = `cycles ran: ${cpuInstance.IOhandler.scheduler.count}`;
 
-        debugger;
+        //debugger;
         await sleep(1);
     }
 }

@@ -5,10 +5,9 @@
  */
 "use strict"
 
-import { GameBoyVideoCanvas } from "./framebufferReader.js";
 import { IO_LABELS, IOManager } from "./io.js";
 import { Memory } from "./mmu.js";
-import { ctz32, sleep } from "./util.js";
+import { ctz32 } from "./util.js";
 
 const REGS = Object.freeze({
     B: 0,
@@ -75,6 +74,7 @@ class GameBoyCore {
 
         this.frameCycles = 0;
         this.#initIOregs();
+        this.totalCycles = 0;
     }
 
     get BC() {
@@ -192,15 +192,19 @@ class GameBoyCore {
      * @param {number} targetAddress
      */
     #executeInterrupt(targetAddress){
-        this.incrCycleCounter(2);
 
         let r = this.PC;
+        this.incrCycleCounter(2);
+
         this.SP = asUint16(this.SP - 1);
         this.MMU.storeByteMMU(this.SP, r >>> 8 & 0xFF);
+
         this.SP = asUint16(this.SP - 1);
         this.MMU.storeByteMMU(this.SP, r >>> 0 & 0xFF);
-        this.PC = targetAddress;
+
         this.incrCycleCounter(1);
+
+        this.PC = targetAddress;
     }
 
     runAllCachedCycles(){
@@ -230,10 +234,6 @@ class GameBoyCore {
             return;
         }
 
-        if(this.pollScheduler() || this.bufferedCycles >= 10000){
-            this.runAllCachedCycles();
-        }
-
         if(this.checkForInterrupts()){
             let interruptTester = this.IEreg & this.IFreg;
             let lowestInterruptBit = ctz32(interruptTester);
@@ -244,6 +244,11 @@ class GameBoyCore {
 
             this.interruptFlag = 0;
             this.IFreg &= ~(1 << lowestInterruptBit);
+            return;
+        }
+        
+        if(this.pollScheduler() || this.bufferedCycles >= 10000){
+            this.runAllCachedCycles();
         }
 
         const opcode = this.#readAndIncrPC();
@@ -260,9 +265,9 @@ class GameBoyCore {
     }
 
     haltSkip(){
-        this.runAllCachedCycles();
-
         let skippedCycles = 0;
+
+        this.runAllCachedCycles();
         while(skippedCycles < 70000){
             if((this.IEreg & this.IFreg) !== 0){
                 this.halted = false;

@@ -31,7 +31,7 @@ const SCHEDULER_EVENTS = Object.freeze({
 
     LCD_MODE2: 2,
     LCD_MODE3: 3,
-    LCD_MODE0_START: 4,
+    LCD_MODE0: 4,
     LCD_VBLANK: 5,
     LCD_LY153_BUG: 6,
 })
@@ -42,7 +42,7 @@ const LCD_INTR_START = Object.freeze({
     MODE2: 0,
     MODE3: 80,
     MODE0: 80 + 160 + 16,
-    NEXT_LINE: SCANLINE_LENGTH
+    NEXT_LINE: SCANLINE_LENGTH,
 })
 
 const LCD_END_TIME = Object.freeze({
@@ -81,6 +81,8 @@ class IOManager{
         this.scheduler.advance(ticks);
         this.PPU.advance(ticks);
 
+        this.cpu.totalCycles += ticks;
+
         this.#updateTimer(Mcycles);
         this.checkSchedulerEvents();
     }
@@ -99,13 +101,36 @@ class IOManager{
                 }break;
 
                 case SCHEDULER_EVENTS.LCD_MODE2:{
+                    if(!this.ppuEventsActive){
+                        return;
+                    }
+
                     let nextEvent = modPlus(LCD_INTR_START.MODE2 - this.PPU.lineCycles, SCANLINE_LENGTH);
                     this.scheduler.reschedule(nextEvent, SCHEDULER_EVENTS.LCD_MODE2);
+
+                    if(this.PPU.LY === 153){
+                        const remainingCycles = LCD_END_TIME.LY_153_BUG - this.PPU.lineCycles;
+
+                        this.scheduler.reschedule(remainingCycles, SCHEDULER_EVENTS.LCD_LY153_BUG);
+                    }
                 }break;
 
-                case SCHEDULER_EVENTS.LCD_MODE0_START:{
+                case SCHEDULER_EVENTS.LCD_MODE0:{
+                    if(!this.ppuEventsActive){
+                        return;
+                    }
+
                     let nextEvent = modPlus(LCD_INTR_START.MODE0 - this.PPU.lineCycles, SCANLINE_LENGTH);
-                    this.scheduler.reschedule(nextEvent, SCHEDULER_EVENTS.LCD_MODE0_START);
+                    this.scheduler.reschedule(nextEvent, SCHEDULER_EVENTS.LCD_MODE0);
+                
+                }break;
+
+                case SCHEDULER_EVENTS.LCD_LY153_BUG:{
+                    if(!this.ppuEventsActive){
+                        return;
+                    }
+
+                    this.scheduler.reschedule(Infinity, SCHEDULER_EVENTS.LCD_LY153_BUG);
                 
                 }break;
 
@@ -149,8 +174,9 @@ class IOManager{
                         this.#reenableLCD();
                     }
                 }else{
-                    //debugger;
-                    this.ppuEventsActive = false;
+                    if(this.ppuEventsActive){
+                        this.#disableLCD();
+                    }
                 }
             }break;
         }
@@ -186,7 +212,12 @@ class IOManager{
         this.PPU.enableLCD();
 
         this.scheduler.addEventOffset(0, SCHEDULER_EVENTS.LCD_MODE2);
-        this.scheduler.addEventOffset(0, SCHEDULER_EVENTS.LCD_MODE0_START);
+        this.scheduler.addEventOffset(0, SCHEDULER_EVENTS.LCD_MODE0);
+    }
+
+    #disableLCD(){
+        this.ppuEventsActive = false;
+        this.PPU.resetLCD();
     }
 
     /**

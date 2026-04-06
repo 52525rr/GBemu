@@ -4,7 +4,7 @@
  */
 
 import { INTERRUPT_SOURCES } from "./cpu.js";
-import { IO_LABELS, SCHEDULER_EVENTS, LCD_START_TIME, LCD_END_TIME, IOManager } from "./io.js";
+import { IO_LABELS, LCD_END_TIME, IOManager } from "./io.js";
 import { bitReverse8 } from "./util.js";
 
 "use strict"
@@ -24,6 +24,8 @@ const LY_VBLANK = 144;
 const LINES_PER_FRAME = 154;
 
 const SCANLINE_LENGTH = 456;
+
+const RENDER_DELAY = 12;
 
 /**
  * @param {Uint8ClampedArray} framebuffer
@@ -50,6 +52,7 @@ class PPU {
     #windowIncr;
     #prevStatSignal;
     #shadowLY;
+    #shadowPPUmode;
 
     /**
      * @type {{
@@ -72,6 +75,7 @@ class PPU {
         this.LX = 0;
         this.WLY = 0;
         this.#shadowLY = 0;
+        this.#shadowPPUmode = 0;
 
         this.LCDenabled = false;
         this.framebuffer = new Uint8ClampedArray(SCREEN_HEIGHT * SCREEN_WIDTH * BYTES_PER_PIXEL);
@@ -86,18 +90,23 @@ class PPU {
         }
 
         this.FIFOpenalty = 0;
+        this.renderDelay = 0;
+
+        this.OAMDMAcounter = 0;
     }
 
     resetLCD(){
         this.LY = 0;
         this.LX = 0;
         this.#shadowLY = 0;
+        this.#shadowPPUmode = 0;
         this.LCDenabled = false;
         this.PPUmode = 0;
         this.lineCycles = 0;
         this.FIFOpenalty = 0;
         this.#windowIncr = false;
         this.#prevStatSignal = 0;
+        this.renderDelay = 0;
     }
 
     enableLCD(){
@@ -106,16 +115,17 @@ class PPU {
 
     #updateIOregs(){
         const io = this.ioRegs;
+        const LYC = io[IO_LABELS.LYC];
 
-        io[IO_LABELS.LY] = this.LY;
+        io[IO_LABELS.LY] = this.#shadowLY;
 
         io[IO_LABELS.STAT] &= ~0b00000111; 
-        io[IO_LABELS.STAT] |= (this.PPUmode);
+        io[IO_LABELS.STAT] |= (this.#shadowPPUmode) | (+(this.#shadowLY == LYC) << 2);
     }
 
     #calculateSTATsignal(){
         const STAT = this.ioRegs[IO_LABELS.STAT];
-        const LYC = this.ioRegs[IO_LABELS.LYC]
+        const LYC = this.ioRegs[IO_LABELS.LYC];
 
         const statIntrEnable = STAT >> 3 & 0b1111;
 
@@ -123,11 +133,21 @@ class PPU {
             +(this.PPUmode === 0) << 0 | 
             +(this.PPUmode === 1) << 1 | 
             +(this.PPUmode === 2) << 2 | 
-            +(this.LY == LYC) << 3;
+            +(this.#shadowLY == LYC) << 3;
 
         const enabledIntrSignal = condBits & statIntrEnable;
 
         return +(enabledIntrSignal > 0);
+    }
+
+    /**
+     * @param {number} lineCycles
+     */
+    #updateShadowRegs(lineCycles){
+        const lyGlitched = this.LY === 153 && lineCycles >= 4;
+
+        this.#shadowLY = lyGlitched ? 0 : this.LY;
+        this.#shadowPPUmode = lyGlitched ? 0 : this.PPUmode;
     }
     
     /**
@@ -139,9 +159,8 @@ class PPU {
          * @param {number} LY 
          * @returns {number[]}
          */
-        const cyclesUntilNextInterestingThing = 
-        (lineCycles, LY) => {
-            if(LY >= 144){
+        const cyclesUntilNextInterestingThing = (lineCycles, LY) => {
+            if(LY >= LY_VBLANK){
                 if(LY === 153 && lineCycles < LCD_END_TIME.LY_153_BUG){
                     return [LCD_END_TIME.LY_153_BUG, PPU_MODES.VBLANK];
 
@@ -149,12 +168,11 @@ class PPU {
                     return [LCD_END_TIME.HBLANK, PPU_MODES.VBLANK];
                 }
             }
-
             if(lineCycles < LCD_END_TIME.OAM){
                 return [LCD_END_TIME.OAM, PPU_MODES.OAM_SCAN];
 
-            }else if(lineCycles < LCD_END_TIME.HBLANK + 0){
-                return [LCD_END_TIME.HBLANK, PPU_MODES.RENDERING];
+            }else if(lineCycles < LCD_END_TIME.RENDERING + 0){
+                return [LCD_END_TIME.RENDERING, PPU_MODES.RENDERING];
 
             }else{
                 return [LCD_END_TIME.HBLANK, PPU_MODES.HBLANK];
@@ -174,8 +192,6 @@ class PPU {
             
             const batchedCycles = Math.min(nextEventTime, ticks);
 
-            ticks -= batchedCycles;
-
             let futureLineTime = this.lineCycles + batchedCycles;
 
             if(futureLineTime >= SCANLINE_LENGTH){
@@ -190,43 +206,54 @@ class PPU {
                 }
                 this.#windowIncr = false;
 
-                if(this.LY === 144){
+                if(this.LY === LY_VBLANK){
                     this.cpu.IFreg |= 1 << INTERRUPT_SOURCES.VBLANK;
                 }
 
                 if(this.LY >= LINES_PER_FRAME){
                     this.LY = 0;
                     this.WLY = 0;
+                    //console.log("FRAME_END");
                 }
             }
             
             let [, nextPPUMode] = cyclesUntilNextInterestingThing(futureLineTime, this.LY);
-            this.PPUmode = nextPPUMode;
 
             if(currentPPUMode != nextPPUMode){
                 if(currentPPUMode == PPU_MODES.OAM_SCAN){
                     let spriteList = this.#calculateSprites(this.LY);
                     let a = this.#createSpriteOverlay(spriteList, this.LY);
-                    this.#spriteInfo.spriteBuffer = a.spriteBuffer;
-                    this.#spriteInfo.spriteAttributeBuffer = a.spriteAttributeBuffer;
+                    this.#spriteInfo = a;
+
+                    this.renderDelay = RENDER_DELAY;
+                    //console.log([this.LY, this.lineCycles])
                 }
             }
 
-            if(nextPPUMode === PPU_MODES.RENDERING){
+            if(currentPPUMode === PPU_MODES.RENDERING && futureLineTime >= LCD_END_TIME.OAM){
                 this.drawPixels(batchedCycles);
             }
 
+            this.PPUmode = nextPPUMode;
+            this.lineCycles = futureLineTime;
+
+            this.#updateShadowRegs(this.lineCycles);
+
             const statSignal = this.#calculateSTATsignal();
             if(statSignal > this.#prevStatSignal){
+
                 this.cpu.IFreg |= 1 << INTERRUPT_SOURCES.STAT;
-                //debugger;
+
+                if(this.LY === 153){
+                    debugger;
+                }
             }
+
             this.#prevStatSignal = statSignal;
 
-            this.lineCycles = futureLineTime;
+            this.#updateIOregs();
+            ticks -= batchedCycles;
         }
-
-        this.#updateIOregs();
     }
 
     /**
@@ -268,15 +295,11 @@ class PPU {
         if(true){ 
             spriteList.sort((a, b) => {
                 // DMG mode, sprites sorted by X position
-                let r = b.x - a.x;
+                let r = a.x - b.x;
                 if(r !== 0) return r;
-                r = b.oamIndex - a.oamIndex;
+                r = a.oamIndex - b.oamIndex;
                 return r;
             })
-        }
-
-        if(spriteList.length > 0){
-            debugger
         }
 
         return spriteList;
@@ -338,11 +361,11 @@ class PPU {
                 let pix = (tilePlane0 >> pixelShiftAmount & 1) + 2*(tilePlane1 >> pixelShiftAmount & 1);
 
                 if(bufferIndex >= 0 && bufferIndex <= SCREEN_WIDTH){
-                    spriteBuffer[bufferIndex] = pix;
-                    spriteAttributeBuffer[bufferIndex] = attributes;
+                    // only overwrite the value if no sprite pixels were written before
+                    spriteBuffer[bufferIndex] ??= pix;
+                    spriteAttributeBuffer[bufferIndex] ??= attributes;
                 }
             }
-
         }
 
         return { spriteBuffer, spriteAttributeBuffer }
@@ -358,10 +381,18 @@ class PPU {
                 byte >> 2 & 0b11,
                 byte >> 4 & 0b11,
                 byte >> 6 & 0b11,
-            ]
+            ];
         }
 
-        const asInt8 = (/** @type {number} */ n) => (n << 24 >> 24);
+        while(this.renderDelay > 0 && bufferedPixels > 0){
+            this.renderDelay--;
+            bufferedPixels--;
+            if(bufferedPixels <= 0){
+                return;
+            }
+        }
+
+        const asInt8 = (/** @type {number} */ n) => (n << 24) >> 24;
 
         const LCDC = this.ioRegs[IO_LABELS.LCDC];
         const scrollX  = this.ioRegs[IO_LABELS.SCX];
