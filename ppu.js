@@ -91,8 +91,6 @@ class PPU {
 
         this.FIFOpenalty = 0;
         this.renderDelay = 0;
-
-        this.OAMDMAcounter = 0;
     }
 
     resetLCD(){
@@ -241,12 +239,7 @@ class PPU {
 
             const statSignal = this.#calculateSTATsignal();
             if(statSignal > this.#prevStatSignal){
-
                 this.cpu.IFreg |= 1 << INTERRUPT_SOURCES.STAT;
-
-                if(this.LY === 153){
-                    debugger;
-                }
             }
 
             this.#prevStatSignal = statSignal;

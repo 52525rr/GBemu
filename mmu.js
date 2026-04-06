@@ -140,7 +140,6 @@ class Memory{
         
         this.storeByteDirect(addr, byte);
         this.cpu.IOhandler.trapIOwrite(addr, byte);
-        
     }
 
     /**

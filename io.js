@@ -17,7 +17,7 @@ const IO_LABELS = Object.freeze({
     SCX:    0x43,
     LY:     0x44,
     LYC:    0x45,
-
+    OAMDMA: 0x46,
     BGP:    0x47,
     OBP0:   0x48,
     OBP1:   0x49,
@@ -71,6 +71,10 @@ class IOManager{
         this.IO = this.cpu.MMU.IO;
 
         this.ppuEventsActive = false;
+
+        this.OAMDMAactive = false;
+        this.OAMDMAsource = 0;
+        this.OAMDMAcounter = 0;
     }
 
     /**
@@ -84,6 +88,7 @@ class IOManager{
         this.cpu.totalCycles += ticks;
 
         this.#updateTimer(Mcycles);
+        this.tickOAMDMA(Mcycles);
         this.checkSchedulerEvents();
     }
 
@@ -131,7 +136,6 @@ class IOManager{
                     }
 
                     this.scheduler.reschedule(Infinity, SCHEDULER_EVENTS.LCD_LY153_BUG);
-                
                 }break;
 
                 default:{
@@ -178,6 +182,10 @@ class IOManager{
                         this.#disableLCD();
                     }
                 }
+            }break;
+
+            case IO_LABELS.OAMDMA:{
+                this.#initOAMDMAtransfer(byte);
             }break;
         }
     }
@@ -242,6 +250,30 @@ class IOManager{
             }
         }
         this.IO[IO_LABELS.DIV] = this.DIV >> 6;
+    }
+
+    /**
+     * @param {number} byte
+     */
+    #initOAMDMAtransfer(byte){
+        this.OAMDMAactive = true;
+        this.OAMDMAsource = byte << 8;
+        this.OAMDMAcounter = 0;
+    }
+
+    /**
+     * @param {number} Mcycles
+     */
+    tickOAMDMA(Mcycles){
+        for(let i = 0; i < Mcycles; i++){
+            let b = this.cpu.MMU.loadByteDirect(this.OAMDMAsource++);
+            this.cpu.MMU.OAM[this.OAMDMAcounter++] = b;
+
+            if(this.OAMDMAcounter >= 160){
+                this.OAMDMAactive = false;
+                break;
+            }
+        }
     }
 
     get TIMA(){
