@@ -401,19 +401,14 @@ class PPU {
         const tileMap0Base = 0x1800; 
         const tileMap1Base = 0x1C00; 
         // index into the VRAM array directly, so the address is offset by 0x8000.
-
         const windowTileMapBase = (LCDC >> 6 & 1) ? tileMap1Base : tileMap0Base;
         const backgroundTileMapBase = (LCDC >> 3 & 1) ? tileMap1Base : tileMap0Base;
 
         const windowEnabled = Boolean(LCDC >> 5 & 1);
         const backgroundEnabled = Boolean(LCDC >> 0 & 1);
-
         const spritesEnabled = Boolean(LCDC >> 1 & 1);
-
         const spriteHeight = (LCDC >> 2 & 1) ? 16 : 8;
-
         const tileBasePointer = tileAddressingMode ? 0x1000 : 0x0000;
-        
         let tileMapBase = backgroundTileMapBase;
 
         const paletteArray = unpackDMGpalette(dmgPaletteMap);
@@ -447,7 +442,7 @@ class PPU {
             /**
              * @type {number}
              */
-            let palID;
+            let palID,  bgPix;
 
             if(backgroundEnabled){
                 let tileX = Math.floor(screenX / 8) & 0x1F;
@@ -465,9 +460,8 @@ class PPU {
 
                 let pixelShiftAmount = 7 - screenX % 8;
 
-                let pix = (tilePlane0 >> pixelShiftAmount & 1) + 2*(tilePlane1 >> pixelShiftAmount & 1);
-
-                palID = paletteArray[pix];
+                bgPix = (tilePlane0 >> pixelShiftAmount & 1) + 2*(tilePlane1 >> pixelShiftAmount & 1);
+                palID = paletteArray[bgPix];
                 
             }else{
                 palID = 0;
@@ -481,7 +475,7 @@ class PPU {
 
                 let objPal = palette ? obj1PaletteArray : obj0PaletteArray;
 
-                let spriteCanDrawOverBackground = spritePalID !== 0 && (spritePriority ? palID === 0 : true);
+                let spriteCanDrawOverBackground = spritePalID !== 0 && (spritePriority ? bgPix === 0 : true);
 
                 if(spriteCanDrawOverBackground){
                     palID = objPal[spritePalID];

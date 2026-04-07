@@ -41,14 +41,14 @@ const SCANLINE_LENGTH = 456;
 const LCD_INTR_START = Object.freeze({
     MODE2: 0,
     MODE3: 80,
-    MODE0: 80 + 160 + 16,
+    MODE0: 80 + 160 + 20,
     NEXT_LINE: SCANLINE_LENGTH,
 })
 
 const LCD_END_TIME = Object.freeze({
     LY_153_BUG: 4,
     OAM: 80,
-    RENDERING: 80 + 160 + 16,
+    RENDERING: 80 + 160 + 20,
     HBLANK: SCANLINE_LENGTH,
 })
 
@@ -160,16 +160,18 @@ class IOManager{
             }break;
 
             case IO_LABELS.TIMA:{
-                //debugger
                 this.#rescheduleTIMAevent();
+
             }break;
 
             case IO_LABELS.TMA:{
                 this.#rescheduleTIMAevent();
+
             }break;
 
             case IO_LABELS.TAC:{
                 this.#rescheduleTIMAevent();
+
             }break;
 
             case IO_LABELS.LCDC:{
@@ -186,6 +188,7 @@ class IOManager{
 
             case IO_LABELS.OAMDMA:{
                 this.#initOAMDMAtransfer(byte);
+
             }break;
         }
     }
@@ -219,8 +222,8 @@ class IOManager{
         this.ppuEventsActive = true;
         this.PPU.enableLCD();
 
-        this.scheduler.addEventOffset(0, SCHEDULER_EVENTS.LCD_MODE2);
-        this.scheduler.addEventOffset(0, SCHEDULER_EVENTS.LCD_MODE0);
+        this.scheduler.reschedule(0, SCHEDULER_EVENTS.LCD_MODE2);
+        this.scheduler.reschedule(0, SCHEDULER_EVENTS.LCD_MODE0);
     }
 
     #disableLCD(){

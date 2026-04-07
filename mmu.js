@@ -15,13 +15,6 @@ function assertRomSize(romData){
     }
 }
 
-/**
- * @param {number} addr
- */
-function isUnsafeAddress(addr){
-    return addr >= 0xFF00 && addr <= 0xFF7F;
-}
-
 class Memory{
     /**
      * @param {Uint8Array} romFile
@@ -48,6 +41,14 @@ class Memory{
 
         const mapperCallbackBinding = createMapperCallbackBinding(this);
         this.mapperCallback = mapperCallbackBinding[CART_MAPPER];
+    }
+
+    /**
+     * @param {number} addr
+     */
+
+    isUnsafeAddress(addr){
+        return (addr >= 0xFF00 && addr <= 0xFF7F);
     }
 
     /**
@@ -118,11 +119,9 @@ class Memory{
      */
     loadByteMMU(addr){
         this.cpu.incrCycleCounter();
-        if(isUnsafeAddress(addr)){
+        
+        if(this.isUnsafeAddress(addr)){
             this.cpu.runAllCachedCycles();
-        }
-        if(addr === 0xFF0F){
-            //debugger;
         }
         return this.loadByteDirect(addr);
     }
@@ -134,7 +133,7 @@ class Memory{
     storeByteMMU(addr, byte){
         this.cpu.incrCycleCounter();
 
-        if(isUnsafeAddress(addr)){
+        if(this.isUnsafeAddress(addr)){
             this.cpu.runAllCachedCycles();
         }
         
