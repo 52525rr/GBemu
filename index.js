@@ -15,8 +15,8 @@ async function readFileAsArray(file) {
     return new Uint8Array(r);
 }
 
-async function _start(){
-    if(lock)return;
+async function _start() {
+    if (lock) return;
     lock = true;
 
     let ROMfile = await readFileAsArray(input.files[0]);

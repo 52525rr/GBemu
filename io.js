@@ -5,24 +5,26 @@ import { PPU } from "./ppu.js";
 import { Scheduler } from "./scheduler.js";
 
 const IO_LABELS = Object.freeze({
-    IF:     0x0F,
-    DIV:    0x04,
-    TIMA:   0x05,
-    TMA:    0x06,
-    TAC:    0x07,
+    JOYPAD: 0x00,
 
-    LCDC:   0x40,
-    STAT:   0x41,
-    SCY:    0x42,
-    SCX:    0x43,
-    LY:     0x44,
-    LYC:    0x45,
+    DIV: 0x04,
+    TIMA: 0x05,
+    TMA: 0x06,
+    TAC: 0x07,
+    IF: 0x0F,
+
+    LCDC: 0x40,
+    STAT: 0x41,
+    SCY: 0x42,
+    SCX: 0x43,
+    LY: 0x44,
+    LYC: 0x45,
     OAMDMA: 0x46,
-    BGP:    0x47,
-    OBP0:   0x48,
-    OBP1:   0x49,
-    WY:     0x4A,
-    WX:     0x4B,
+    BGP: 0x47,
+    OBP0: 0x48,
+    OBP1: 0x49,
+    WY: 0x4A,
+    WX: 0x4B,
 })
 
 const SCHEDULER_EVENTS = Object.freeze({
@@ -37,37 +39,42 @@ const SCHEDULER_EVENTS = Object.freeze({
 })
 
 const SCANLINE_LENGTH = 456;
+const OAM_SCAN_DOT_COUNT = 80;
+const LINE_DOT_COUNT = 160;
+const END_DELAY = 20;
 
 const LCD_INTR_START = Object.freeze({
     MODE2: 0,
-    MODE3: 80,
-    MODE0: 80 + 160 + 20,
+    MODE3: OAM_SCAN_DOT_COUNT,
+    MODE0: OAM_SCAN_DOT_COUNT + LINE_DOT_COUNT + END_DELAY,
     NEXT_LINE: SCANLINE_LENGTH,
 })
 
 const LCD_END_TIME = Object.freeze({
     LY_153_BUG: 4,
-    OAM: 80,
-    RENDERING: 80 + 160 + 20,
+    OAM: OAM_SCAN_DOT_COUNT,
+    RENDERING: OAM_SCAN_DOT_COUNT + LINE_DOT_COUNT + END_DELAY,
     HBLANK: SCANLINE_LENGTH,
 })
 
 const modPlus = (/** @type {number} */ a, /** @type {number} */ b) => {
-    let r = (a%b + b) % b;
+    let r = (a % b + b) % b;
     if (r <= 0) r += b;
     return r;
 }
 
-class IOManager{
+class IOManager {
     /**
      * @param {GameBoyCore} cpuInstance
      */
-    constructor(cpuInstance){
+    constructor(cpuInstance) {
         this.cpu = cpuInstance;
+        this.mem = cpuInstance.MMU;
+
         this.DIV = 0;
         this.scheduler = new Scheduler();
         this.PPU = new PPU(this);
-        
+
         this.IO = this.cpu.MMU.IO;
 
         this.ppuEventsActive = false;
@@ -80,7 +87,7 @@ class IOManager{
     /**
      * @param {number} ticks
      */
-    step(ticks){
+    step(ticks) {
         const Mcycles = ticks / this.cpu.cyclesPerTick;
         this.scheduler.advance(ticks);
         this.PPU.advance(ticks);
@@ -92,55 +99,55 @@ class IOManager{
         this.checkSchedulerEvents();
     }
 
-    checkSchedulerEvents(){
-        while(this.scheduler.timeUntilNext <= 0){
+    checkSchedulerEvents() {
+        while (this.scheduler.timeUntilNext <= 0) {
             const E = this.scheduler.peekNextEvent();
-            if(E == undefined){
+            if (E === undefined) {
                 break;
             }
 
-            switch(E.event){
-                case SCHEDULER_EVENTS.TIMA_INTERRUPT:{
+            switch (E.event) {
+                case SCHEDULER_EVENTS.TIMA_INTERRUPT: {
                     this.#rescheduleTIMAevent();
-                
-                }break;
 
-                case SCHEDULER_EVENTS.LCD_MODE2:{
-                    if(!this.ppuEventsActive){
+                } break;
+
+                case SCHEDULER_EVENTS.LCD_MODE2: {
+                    if (!this.ppuEventsActive) {
                         return;
                     }
 
-                    let nextEvent = modPlus(LCD_INTR_START.MODE2 - this.PPU.lineCycles, SCANLINE_LENGTH);
-                    this.scheduler.reschedule(nextEvent, SCHEDULER_EVENTS.LCD_MODE2);
+                    let nextEventTime = modPlus(LCD_INTR_START.MODE2 - this.PPU.lineCycles, SCANLINE_LENGTH);
+                    this.scheduler.reschedule(nextEventTime, SCHEDULER_EVENTS.LCD_MODE2);
 
-                    if(this.PPU.LY === 153){
+                    if (this.PPU.LY === 153) {
                         const remainingCycles = LCD_END_TIME.LY_153_BUG - this.PPU.lineCycles;
 
                         this.scheduler.reschedule(remainingCycles, SCHEDULER_EVENTS.LCD_LY153_BUG);
                     }
-                }break;
+                } break;
 
-                case SCHEDULER_EVENTS.LCD_MODE0:{
-                    if(!this.ppuEventsActive){
+                case SCHEDULER_EVENTS.LCD_MODE0: {
+                    if (!this.ppuEventsActive) {
                         return;
                     }
 
-                    let nextEvent = modPlus(LCD_INTR_START.MODE0 - this.PPU.lineCycles, SCANLINE_LENGTH);
-                    this.scheduler.reschedule(nextEvent, SCHEDULER_EVENTS.LCD_MODE0);
-                
-                }break;
+                    let nextEventTime = modPlus(LCD_INTR_START.MODE0 - this.PPU.lineCycles, SCANLINE_LENGTH);
+                    this.scheduler.reschedule(nextEventTime, SCHEDULER_EVENTS.LCD_MODE0);
 
-                case SCHEDULER_EVENTS.LCD_LY153_BUG:{
-                    if(!this.ppuEventsActive){
+                } break;
+
+                case SCHEDULER_EVENTS.LCD_LY153_BUG: {
+                    if (!this.ppuEventsActive) {
                         return;
                     }
 
                     this.scheduler.reschedule(Infinity, SCHEDULER_EVENTS.LCD_LY153_BUG);
-                }break;
+                } break;
 
-                default:{
+                default: {
                     debugger;
-                }break;
+                } break;
             }
         }
     }
@@ -149,61 +156,70 @@ class IOManager{
      * @param {number} addr
      * @param {number} byte
      */
-    trapIOwrite(addr, byte){
+    trapIOwrite(addr, byte) {
         const ioLower = addr & 0xFF;
         const a = addr >> 8;
-        if(a !== 0xFF) return;
+        if (a !== 0xFF) return;
+        if (addr >= 0xFF80 && addr <= 0xFFFE) return;
 
-        switch(ioLower){
-            case IO_LABELS.DIV:{
-                debugger;
-            }break;
+        switch (ioLower) {
+            case IO_LABELS.JOYPAD: {
+                const buttonsSelected = (byte >> 5 & 1) !== 0;
+                const dPadSelected = (byte >> 4 & 1) !== 0;
 
-            case IO_LABELS.TIMA:{
+                this.JOYPAD |= 0b1111;
+            } break;
+
+            case IO_LABELS.DIV: {
+                this.DIV = 0;
+                this.#rescheduleTIMAevent();
+            } break;
+
+            case IO_LABELS.TIMA: {
                 this.#rescheduleTIMAevent();
 
-            }break;
+            } break;
 
-            case IO_LABELS.TMA:{
+            case IO_LABELS.TMA: {
                 this.#rescheduleTIMAevent();
 
-            }break;
+            } break;
 
-            case IO_LABELS.TAC:{
+            case IO_LABELS.TAC: {
                 this.#rescheduleTIMAevent();
 
-            }break;
+            } break;
 
-            case IO_LABELS.LCDC:{
-                if((byte & 0b1000_0000) !== 0){
-                    if(!this.ppuEventsActive){
+            case IO_LABELS.LCDC: {
+                if ((byte & 0b1000_0000) !== 0) {
+                    if (!this.ppuEventsActive) {
                         this.#reenableLCD();
                     }
-                }else{
-                    if(this.ppuEventsActive){
+                } else {
+                    if (this.ppuEventsActive) {
                         this.#disableLCD();
                     }
                 }
-            }break;
+            } break;
 
-            case IO_LABELS.OAMDMA:{
+            case IO_LABELS.OAMDMA: {
                 this.#initOAMDMAtransfer(byte);
 
-            }break;
+            } break;
         }
     }
 
-    #getTIMAspeed(){
+    #getTIMAspeed() {
         let TIMAspeed = this.TAC & 0b11;
-        if(TIMAspeed == 0) TIMAspeed = 4;
+        if (TIMAspeed == 0) TIMAspeed = 4;
         return 4 ** TIMAspeed; // 4, 16, 64, or 256 M cycles
     }
 
-    #rescheduleTIMAevent(useEventTimestamp = false){
+    #rescheduleTIMAevent(useEventTimestamp = false) {
         // DIV should be up to date when this is called
         const TIMAenabled = this.TAC >> 2 & 1;
 
-        if(!TIMAenabled){
+        if (!TIMAenabled) {
             this.scheduler.reschedule(Infinity, SCHEDULER_EVENTS.TIMA_INTERRUPT);
             return;
         }
@@ -212,13 +228,13 @@ class IOManager{
         let TIMAspeed = this.#getTIMAspeed(); // M cycles
         let DIVclocked = TIMAspeed - (this.DIV % TIMAspeed); // time until next increment??
 
-        let ticksUntilInterrupt = (DIVclocked + untilOverflow*TIMAspeed) * this.cpu.cyclesPerTick;
+        let ticksUntilInterrupt = (DIVclocked + untilOverflow * TIMAspeed) * this.cpu.cyclesPerTick;
 
         this.scheduler.reschedule(ticksUntilInterrupt, SCHEDULER_EVENTS.TIMA_INTERRUPT, useEventTimestamp);
         //debugger
     }
 
-    #reenableLCD(){
+    #reenableLCD() {
         this.ppuEventsActive = true;
         this.PPU.enableLCD();
 
@@ -226,7 +242,7 @@ class IOManager{
         this.scheduler.reschedule(0, SCHEDULER_EVENTS.LCD_MODE0);
     }
 
-    #disableLCD(){
+    #disableLCD() {
         this.ppuEventsActive = false;
         this.PPU.resetLCD();
     }
@@ -234,19 +250,19 @@ class IOManager{
     /**
      * @param {number} normalizedCycles
      */
-    #updateTimer(normalizedCycles){
+    #updateTimer(normalizedCycles) {
         let TIMAspeed = this.#getTIMAspeed();
         const TIMAenabled = this.TAC >> 2 & 1;
 
-        for(let i = 0; i < normalizedCycles; i++){
+        for (let i = 0; i < normalizedCycles; i++) {
             this.DIV += 1;
             this.DIV %= 0x10000;
 
-            if(TIMAenabled && this.DIV % TIMAspeed === 0){
+            if (TIMAenabled && this.DIV % TIMAspeed === 0) {
                 let TIMAold = this.TIMA;
                 this.TIMA++;
 
-                if(TIMAold + 1 > 0xFF){
+                if (TIMAold + 1 > 0xFF) {
                     this.TIMA = this.TMA;
                     this.cpu.IFreg |= 1 << INTERRUPT_SOURCES.TIMER;
                 }
@@ -258,45 +274,54 @@ class IOManager{
     /**
      * @param {number} byte
      */
-    #initOAMDMAtransfer(byte){
+    #initOAMDMAtransfer(byte) {
         this.OAMDMAactive = true;
         this.OAMDMAsource = byte << 8;
         this.OAMDMAcounter = 0;
+
+        console.log(`OAM INIT: 0x${byte.toString(16)}00`)
     }
 
     /**
      * @param {number} Mcycles
      */
-    tickOAMDMA(Mcycles){
-        for(let i = 0; i < Mcycles; i++){
+    tickOAMDMA(Mcycles) {
+        for (let i = 0; i < Mcycles; i++) {
             let b = this.cpu.MMU.loadByteDirect(this.OAMDMAsource++);
             this.cpu.MMU.OAM[this.OAMDMAcounter++] = b;
 
-            if(this.OAMDMAcounter >= 160){
+            if (this.OAMDMAcounter >= 160) {
                 this.OAMDMAactive = false;
                 break;
             }
         }
     }
 
-    get TIMA(){
+    get JOYPAD() {
+        return this.IO[IO_LABELS.JOYPAD];
+    }
+    set JOYPAD(v) {
+        this.IO[IO_LABELS.JOYPAD] = v;
+    }
+
+    get TIMA() {
         return this.IO[IO_LABELS.TIMA];
     }
-    set TIMA(v){
+    set TIMA(v) {
         this.IO[IO_LABELS.TIMA] = v;
     }
 
-    get TMA(){
+    get TMA() {
         return this.IO[IO_LABELS.TMA];
     }
-    set TMA(v){
+    set TMA(v) {
         this.IO[IO_LABELS.TMA] = v;
     }
 
-    get TAC(){
+    get TAC() {
         return this.IO[IO_LABELS.TAC];
     }
-    set TAC(v){
+    set TAC(v) {
         this.IO[IO_LABELS.TAC] = v;
     }
 }

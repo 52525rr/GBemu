@@ -13,10 +13,10 @@ const PPU_MODES = Object.freeze({
     HBLANK: 0,
     VBLANK: 1,
     OAM_SCAN: 2,
-    RENDERING: 3, 
+    RENDERING: 3,
 })
 
-const SCREEN_WIDTH  = 160;
+const SCREEN_WIDTH = 160;
 const SCREEN_HEIGHT = 144;
 const BYTES_PER_PIXEL = 4;
 
@@ -25,7 +25,7 @@ const LINES_PER_FRAME = 154;
 
 const SCANLINE_LENGTH = 456;
 
-const RENDER_DELAY = 12;
+const RENDER_DELAY = 16;
 
 /**
  * @param {Uint8ClampedArray} framebuffer
@@ -33,7 +33,7 @@ const RENDER_DELAY = 12;
  * @param {number} y
  * @param {number} color
  */
-function setPixelOnFrameBuffer(framebuffer, x, y, color){
+function setPixelOnFrameBuffer(framebuffer, x, y, color) {
     let i = (y * SCREEN_WIDTH + x) * BYTES_PER_PIXEL;
     framebuffer[i++] = color >> 16 & 0xFF; // red
     framebuffer[i++] = color >> 8 & 0xFF;  // green
@@ -83,7 +83,7 @@ class PPU {
         this.lineCycles = 0;
         this.#windowIncr = false;
         this.#prevStatSignal = 0;
-        
+
         this.#spriteInfo = {
             spriteBuffer: undefined,
             spriteAttributeBuffer: undefined,
@@ -93,7 +93,7 @@ class PPU {
         this.renderDelay = 0;
     }
 
-    resetLCD(){
+    resetLCD() {
         this.LY = 0;
         this.LX = 0;
         this.#shadowLY = 0;
@@ -105,32 +105,33 @@ class PPU {
         this.#windowIncr = false;
         this.#prevStatSignal = 0;
         this.renderDelay = 0;
+        this.#updateIOregs();
     }
 
-    enableLCD(){
+    enableLCD() {
         this.LCDenabled = true;
     }
 
-    #updateIOregs(){
+    #updateIOregs() {
         const io = this.ioRegs;
         const LYC = io[IO_LABELS.LYC];
 
         io[IO_LABELS.LY] = this.#shadowLY;
 
-        io[IO_LABELS.STAT] &= ~0b00000111; 
+        io[IO_LABELS.STAT] &= ~0b00000111;
         io[IO_LABELS.STAT] |= (this.#shadowPPUmode) | (+(this.#shadowLY == LYC) << 2);
     }
 
-    #calculateSTATsignal(){
+    #calculateSTATsignal() {
         const STAT = this.ioRegs[IO_LABELS.STAT];
         const LYC = this.ioRegs[IO_LABELS.LYC];
 
         const statIntrEnable = STAT >> 3 & 0b1111;
 
-        const condBits = 
-            +(this.PPUmode === 0) << 0 | 
-            +(this.PPUmode === 1) << 1 | 
-            +(this.PPUmode === 2) << 2 | 
+        const condBits =
+            +(this.PPUmode === 0) << 0 |
+            +(this.PPUmode === 1) << 1 |
+            +(this.PPUmode === 2) << 2 |
             +(this.#shadowLY == LYC) << 3;
 
         const enabledIntrSignal = condBits & statIntrEnable;
@@ -141,84 +142,84 @@ class PPU {
     /**
      * @param {number} lineCycles
      */
-    #updateShadowRegs(lineCycles){
+    #updateShadowRegs(lineCycles) {
         const lyGlitched = this.LY === 153 && lineCycles >= 4;
 
         this.#shadowLY = lyGlitched ? 0 : this.LY;
         this.#shadowPPUmode = lyGlitched ? 0 : this.PPUmode;
     }
-    
+
     /**
      * @param {number} ticks
      */
-    advance(ticks){
+    advance(ticks) {
         /**
          * @param {number} lineCycles 
          * @param {number} LY 
          * @returns {number[]}
          */
         const cyclesUntilNextInterestingThing = (lineCycles, LY) => {
-            if(LY >= LY_VBLANK){
-                if(LY === 153 && lineCycles < LCD_END_TIME.LY_153_BUG){
+            if (LY >= LY_VBLANK) {
+                if (LY === 153 && lineCycles < LCD_END_TIME.LY_153_BUG) {
                     return [LCD_END_TIME.LY_153_BUG, PPU_MODES.VBLANK];
 
-                }else{
+                } else {
                     return [LCD_END_TIME.HBLANK, PPU_MODES.VBLANK];
                 }
             }
-            if(lineCycles < LCD_END_TIME.OAM){
+            if (lineCycles < LCD_END_TIME.OAM) {
                 return [LCD_END_TIME.OAM, PPU_MODES.OAM_SCAN];
 
-            }else if(lineCycles < LCD_END_TIME.RENDERING + 0){
+            } else if (lineCycles < LCD_END_TIME.RENDERING + 0) {
                 return [LCD_END_TIME.RENDERING, PPU_MODES.RENDERING];
 
-            }else{
+            } else {
                 return [LCD_END_TIME.HBLANK, PPU_MODES.HBLANK];
             }
         }
 
-        if(!this.LCDenabled){
+        if (!this.LCDenabled) {
             this.#updateIOregs();
             return;
         }
 
-        while(ticks > 0){
+        while (ticks > 0) {
             let b = ticks;
 
-            let [nextEventTime, currentPPUMode] = cyclesUntilNextInterestingThing(this.lineCycles, this.LY);    
+            let [nextEventTime, currentPPUMode] = cyclesUntilNextInterestingThing(this.lineCycles, this.LY);
             nextEventTime -= this.lineCycles;
-            
+
             const batchedCycles = Math.min(nextEventTime, ticks);
 
             let futureLineTime = this.lineCycles + batchedCycles;
 
-            if(futureLineTime >= SCANLINE_LENGTH){
+            if (futureLineTime >= SCANLINE_LENGTH) {
                 futureLineTime -= SCANLINE_LENGTH;
 
                 this.LY += 1;
                 this.LX = 0;
                 this.FIFOpenalty = 0;
 
-                if(this.#windowIncr){
+                if (this.#windowIncr) {
                     this.WLY += 1;
                 }
                 this.#windowIncr = false;
 
-                if(this.LY === LY_VBLANK){
+                if (this.LY === LY_VBLANK) {
                     this.cpu.IFreg |= 1 << INTERRUPT_SOURCES.VBLANK;
                 }
 
-                if(this.LY >= LINES_PER_FRAME){
+                if (this.LY >= LINES_PER_FRAME) {
                     this.LY = 0;
                     this.WLY = 0;
                     //console.log("FRAME_END");
                 }
             }
-            
+
             let [, nextPPUMode] = cyclesUntilNextInterestingThing(futureLineTime, this.LY);
 
-            if(currentPPUMode != nextPPUMode){
-                if(currentPPUMode == PPU_MODES.OAM_SCAN){
+            if (currentPPUMode != nextPPUMode) {
+                if (currentPPUMode == PPU_MODES.OAM_SCAN) {
                     let spriteList = this.#calculateSprites(this.LY);
                     let a = this.#createSpriteOverlay(spriteList, this.LY);
                     this.#spriteInfo = a;
@@ -228,7 +229,7 @@ class PPU {
                 }
             }
 
-            if(currentPPUMode === PPU_MODES.RENDERING && futureLineTime >= LCD_END_TIME.OAM){
+            if (currentPPUMode === PPU_MODES.RENDERING && futureLineTime >= LCD_END_TIME.OAM) {
                 this.drawPixels(batchedCycles);
             }
 
@@ -238,7 +239,7 @@ class PPU {
             this.#updateShadowRegs(this.lineCycles);
 
             const statSignal = this.#calculateSTATsignal();
-            if(statSignal > this.#prevStatSignal){
+            if (statSignal > this.#prevStatSignal) {
                 this.cpu.IFreg |= 1 << INTERRUPT_SOURCES.STAT;
             }
 
@@ -252,7 +253,7 @@ class PPU {
     /**
      * @param {number} LY
      */
-    #calculateSprites(LY){
+    #calculateSprites(LY) {
         const OAM = this.mem.OAM;
         const LCDC = this.ioRegs[IO_LABELS.LCDC];
         const spriteHeight = (LCDC >> 2 & 1) ? 16 : 8;
@@ -262,15 +263,15 @@ class PPU {
          */
         let spriteList = [];
 
-        for(let i = 0; i < 40; i++){
+        for (let i = 0; i < 40; i++) {
             let OAMindex = i * 4;
-            
+
             const spriteY = OAM[OAMindex + 0] - 16;
             const spriteX = OAM[OAMindex + 1] - 8;
             const spriteIndex = OAM[OAMindex + 2];
             const spriteAttributes = OAM[OAMindex + 3];
 
-            if(LY >= spriteY && LY < spriteY + spriteHeight){
+            if (LY >= spriteY && LY < spriteY + spriteHeight) {
                 spriteList.push({
                     x: spriteX,
                     y: spriteY,
@@ -280,16 +281,16 @@ class PPU {
                 })
             }
 
-            if(spriteList.length >= 10){
+            if (spriteList.length >= 10) {
                 break;
             }
         }
 
-        if(true){ 
+        if (true) {
             spriteList.sort((a, b) => {
                 // DMG mode, sprites sorted by X position
                 let r = a.x - b.x;
-                if(r !== 0) return r;
+                if (r !== 0) return r;
                 r = a.oamIndex - b.oamIndex;
                 return r;
             })
@@ -303,11 +304,11 @@ class PPU {
      * @param {number} LY 
      * 
      * @returns {{
-     * spriteBuffer: (number | undefined)[], 
-     * spriteAttributeBuffer: (number | undefined)[]
+     *      spriteBuffer: (number | undefined)[], 
+     *      spriteAttributeBuffer: (number | undefined)[]
      * }}
      */
-    #createSpriteOverlay(spriteList, LY){
+    #createSpriteOverlay(spriteList, LY) {
         // creates a buffer and writes sprite pixels to it ahead of time
         // this makes the pixel renderer's job a lot easier
 
@@ -319,7 +320,7 @@ class PPU {
 
         let tileBasePointer = 0x0000; // start of VRAM or add  0x8000
 
-        for(let sprite of spriteList){
+        for (let sprite of spriteList) {
             let { x, y, index, attributes } = sprite;
 
             const yFlip = attributes >> 6 & 1;
@@ -327,12 +328,12 @@ class PPU {
 
             let spriteLine = LY - y;
 
-            if(yFlip){
+            if (yFlip) {
                 spriteLine = (spriteHeight - 1) - spriteLine;
             }
-            if(spriteHeight == 16){
+            if (spriteHeight == 16) {
                 index &= ~0b01;
-                if(spriteLine >= 8){
+                if (spriteLine >= 8) {
                     index |= 0b01;
                 }
             }
@@ -342,18 +343,18 @@ class PPU {
             let tilePlane0 = this.VRAM[tileBasePointer + spriteDataIndex + 0];
             let tilePlane1 = this.VRAM[tileBasePointer + spriteDataIndex + 1];
 
-            if(xFlip){
+            if (xFlip) {
                 tilePlane0 = bitReverse8(tilePlane0);
                 tilePlane1 = bitReverse8(tilePlane1);
             }
 
-            for(let i = 0; i < 8; i++){
+            for (let i = 0; i < 8; i++) {
                 let bufferIndex = x + i;
                 let pixelShiftAmount = 7 - i;
 
-                let pix = (tilePlane0 >> pixelShiftAmount & 1) + 2*(tilePlane1 >> pixelShiftAmount & 1);
+                let pix = (tilePlane0 >> pixelShiftAmount & 1) + 2 * (tilePlane1 >> pixelShiftAmount & 1);
 
-                if(bufferIndex >= 0 && bufferIndex <= SCREEN_WIDTH){
+                if (bufferIndex >= 0 && bufferIndex <= SCREEN_WIDTH) {
                     // only overwrite the value if no sprite pixels were written before
                     spriteBuffer[bufferIndex] ??= pix;
                     spriteAttributeBuffer[bufferIndex] ??= attributes;
@@ -367,7 +368,7 @@ class PPU {
     /**
      * @param {number} bufferedPixels
      */
-    drawPixels(bufferedPixels){
+    drawPixels(bufferedPixels) {
         const unpackDMGpalette = (/** @type {any} */ byte) => {
             return [
                 byte >> 0 & 0b11,
@@ -377,10 +378,10 @@ class PPU {
             ];
         }
 
-        while(this.renderDelay > 0 && bufferedPixels > 0){
+        while (this.renderDelay > 0 && bufferedPixels > 0) {
             this.renderDelay--;
             bufferedPixels--;
-            if(bufferedPixels <= 0){
+            if (bufferedPixels <= 0) {
                 return;
             }
         }
@@ -388,18 +389,19 @@ class PPU {
         const asInt8 = (/** @type {number} */ n) => (n << 24) >> 24;
 
         const LCDC = this.ioRegs[IO_LABELS.LCDC];
-        const scrollX  = this.ioRegs[IO_LABELS.SCX];
-        const scrollY  = this.ioRegs[IO_LABELS.SCY];
-        const windowX  = this.ioRegs[IO_LABELS.WX] - 7;
-        const windowY  = this.ioRegs[IO_LABELS.WY];
+        const scrollX = this.ioRegs[IO_LABELS.SCX];
+        const scrollY = this.ioRegs[IO_LABELS.SCY];
+        const windowX = this.ioRegs[IO_LABELS.WX] - 7;
+        const windowY = this.ioRegs[IO_LABELS.WY];
         const dmgPaletteMap = this.ioRegs[IO_LABELS.BGP];
         const obj0PaletteMap = this.ioRegs[IO_LABELS.OBP0];
         const obj1PaletteMap = this.ioRegs[IO_LABELS.OBP1];
 
         const tileAddressingMode = !Boolean(LCDC >> 4 & 1);
 
-        const tileMap0Base = 0x1800; 
-        const tileMap1Base = 0x1C00; 
+        const tileMap0Base = 0x1800;
+        const tileMap1Base = 0x1C00;
+
         // index into the VRAM array directly, so the address is offset by 0x8000.
         const windowTileMapBase = (LCDC >> 6 & 1) ? tileMap1Base : tileMap0Base;
         const backgroundTileMapBase = (LCDC >> 3 & 1) ? tileMap1Base : tileMap0Base;
@@ -407,7 +409,7 @@ class PPU {
         const windowEnabled = Boolean(LCDC >> 5 & 1);
         const backgroundEnabled = Boolean(LCDC >> 0 & 1);
         const spritesEnabled = Boolean(LCDC >> 1 & 1);
-        const spriteHeight = (LCDC >> 2 & 1) ? 16 : 8;
+
         const tileBasePointer = tileAddressingMode ? 0x1000 : 0x0000;
         let tileMapBase = backgroundTileMapBase;
 
@@ -415,26 +417,26 @@ class PPU {
         const obj0PaletteArray = unpackDMGpalette(obj0PaletteMap);
         const obj1PaletteArray = unpackDMGpalette(obj1PaletteMap);
 
-        let {spriteBuffer, spriteAttributeBuffer} = this.#spriteInfo;
+        let { spriteBuffer, spriteAttributeBuffer } = this.#spriteInfo;
 
-        if(spriteBuffer === undefined || spriteAttributeBuffer === undefined){
+        if (spriteBuffer === undefined || spriteAttributeBuffer === undefined) {
             throw new Error("sprite list is undefined");
         }
 
-        while(bufferedPixels-- > 0){
-            if(this.LX >= 160){
+        while (bufferedPixels-- > 0) {
+            if (this.LX >= 160) {
                 break;
             }
 
             let screenX, screenY;
 
-            if(windowEnabled && this.LX >= windowX && this.LY >= windowY){
+            if (windowEnabled && this.LX >= windowX && this.LY >= windowY) {
                 screenX = this.LX - windowX;
                 screenY = this.WLY;
                 this.#windowIncr = true;
                 tileMapBase = windowTileMapBase;
 
-            }else{
+            } else {
                 screenX = this.LX + scrollX;
                 screenY = this.LY + scrollY;
             }
@@ -442,16 +444,21 @@ class PPU {
             /**
              * @type {number}
              */
-            let palID,  bgPix;
+            let palID;
 
-            if(backgroundEnabled){
+            /**
+             * @type {number}
+             */
+            let bgPix = 0;
+
+            if (backgroundEnabled) {
                 let tileX = Math.floor(screenX / 8) & 0x1F;
                 let tileY = Math.floor(screenY / 8) & 0x1F;
 
                 let tileIDIndex = (tileY * 32 + tileX);
 
                 let tileIndex = this.VRAM[tileMapBase + tileIDIndex];
-                if(tileAddressingMode) tileIndex = asInt8(tileIndex);
+                if (tileAddressingMode) tileIndex = asInt8(tileIndex);
 
                 let tileDataIndex = (tileIndex * 8 + screenY % 8) * 2;
 
@@ -460,15 +467,15 @@ class PPU {
 
                 let pixelShiftAmount = 7 - screenX % 8;
 
-                bgPix = (tilePlane0 >> pixelShiftAmount & 1) + 2*(tilePlane1 >> pixelShiftAmount & 1);
+                bgPix = (tilePlane0 >> pixelShiftAmount & 1) + 2 * (tilePlane1 >> pixelShiftAmount & 1);
                 palID = paletteArray[bgPix];
-                
-            }else{
+
+            } else {
                 palID = 0;
             }
 
             let spritePalID = spriteBuffer?.[this.LX];
-            if(spritesEnabled && spritePalID !== undefined){
+            if (spritesEnabled && spritePalID !== undefined) {
                 let attributes = spriteAttributeBuffer?.[this.LX] ?? 0;
                 let palette = attributes >> 4 & 1;
                 let spritePriority = attributes >> 7 & 1;
@@ -477,7 +484,7 @@ class PPU {
 
                 let spriteCanDrawOverBackground = spritePalID !== 0 && (spritePriority ? bgPix === 0 : true);
 
-                if(spriteCanDrawOverBackground){
+                if (spriteCanDrawOverBackground) {
                     palID = objPal[spritePalID];
                 }
             }
@@ -485,9 +492,9 @@ class PPU {
             let color = DMG_PALETTE[palID];
 
             setPixelOnFrameBuffer(
-                this.framebuffer, 
-                this.LX, 
-                this.LY, 
+                this.framebuffer,
+                this.LX,
+                this.LY,
                 color
             );
 

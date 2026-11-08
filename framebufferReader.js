@@ -10,20 +10,19 @@ const HEIGHT = 144;
  * @param {number[]} color
  */
 
-
-class GameBoyVideoCanvas{
+class GameBoyVideoCanvas {
     /**
      * @param {string} elementID
      */
-    constructor(elementID){
+    constructor(elementID) {
         /**
          * @type {HTMLCanvasElement}
          */
         // @ts-ignore
         this.screen = document.getElementById(elementID);
 
-        this.screenCTX = this.screen?.getContext("2d", {willReadFrequently: true});
-        if(this.screenCTX === null){
+        this.screenCTX = this.screen?.getContext("2d", { willReadFrequently: true });
+        if (this.screenCTX === null) {
             throw new Error("cannot create canvas element");
         }
 
@@ -35,8 +34,8 @@ class GameBoyVideoCanvas{
     * @param {number} n
     * @param {number[]} color
      */
-    setPixel(n, color){
-        let i = n*4;
+    setPixel(n, color) {
+        let i = n * 4;
         this.imageDataBuffer[i++] = color[0];
         this.imageDataBuffer[i++] = color[1];
         this.imageDataBuffer[i++] = color[2];
@@ -46,13 +45,13 @@ class GameBoyVideoCanvas{
     /**
      * @param {Uint8ClampedArray} buffer
      */
-    copyBuffer(buffer){
-        for(let i = 0; i < buffer.length; i++){
+    copyBuffer(buffer) {
+        for (let i = 0; i < buffer.length; i++) {
             this.imageDataBuffer[i] = buffer[i];
         }
     }
 
-    updateImage(){
+    updateImage() {
         this.screenCTX.putImageData(this.imageData, 0, 0);
     }
 }

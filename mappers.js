@@ -18,38 +18,38 @@ const MAPPERS = Object.freeze({
 /**
  * @param {number} mapperByte
  */
-function getMBC(mapperByte){
-    switch(mapperByte){
-        case 0x00: 
+function getMBC(mapperByte) {
+    switch (mapperByte) {
+        case 0x00:
             return MAPPERS.MBC0;
 
-        case 0x01: 
-        case 0x02: 
-        case 0x03: 
+        case 0x01:
+        case 0x02:
+        case 0x03:
             return MAPPERS.MBC1;
 
-        case 0x05: 
-        case 0x06: 
+        case 0x05:
+        case 0x06:
             return MAPPERS.MBC2;
 
-        case 0x0F: 
+        case 0x0F:
         case 0x10:
-        case 0x11: 
-        case 0x12: 
-        case 0x13: 
+        case 0x11:
+        case 0x12:
+        case 0x13:
             return MAPPERS.MBC3;
 
-        case 0x19: 
+        case 0x19:
         case 0x1A:
-        case 0x1B: 
-        case 0x1C: 
+        case 0x1B:
+        case 0x1C:
         case 0x1D:
-        case 0x1E: 
+        case 0x1E:
             return MAPPERS.MBC5;
 
         case 0x20:
             return MAPPERS.MBC6;
-        
+
         case 0x22:
             return MAPPERS.MBC7;
 
@@ -61,8 +61,8 @@ function getMBC(mapperByte){
 /**
  * @param {number} byte
  */
-function getBankCount(byte){
-    switch(byte){
+function getBankCount(byte) {
+    switch (byte) {
         case 0x00: return 2;
         case 0x01: return 4;
         case 0x02: return 8;
@@ -77,12 +77,12 @@ function getBankCount(byte){
 }
 
 const createMapperCallbackBinding = (/** @type {Memory} */ memoryInstance) => ({
-    
+
     /**
      * @param {number} addr
      * @param {number} value
      */
-    [MAPPERS.MBC0](addr, value){
+    [MAPPERS.MBC0](addr, value) {
         // MBC0 does nothing on writes to ROM
         return;
     },
@@ -92,15 +92,18 @@ const createMapperCallbackBinding = (/** @type {Memory} */ memoryInstance) => ({
      * @param {number} addr
      * @param {number} value
      */
-    [MAPPERS.MBC1](addr, value){
-        if(addr >= 0x2000 && addr <= 0x3FFF){
+    [MAPPERS.MBC1](addr, value) {
+        if (addr >= 0x2000 && addr <= 0x3FFF) {
             const bankCount = memoryInstance.CART_DATA.bankCount;
 
             let selectedBank = value & 0x1F;
-            if(selectedBank === 0) selectedBank = 1;
+            if (selectedBank === 0) selectedBank = 1;
             selectedBank %= bankCount;
 
             memoryInstance.romBank = selectedBank;
+        } else if (addr >= 0x4000 && addr <= 0x5FFF) {
+            // this range can also select SRAM banks
+
         }
     },
 
@@ -109,7 +112,7 @@ const createMapperCallbackBinding = (/** @type {Memory} */ memoryInstance) => ({
      * @param {number} addr
      * @param {number} value
      */
-    [MAPPERS.MBC2](addr, value){
+    [MAPPERS.MBC2](addr, value) {
         throw new Error("unimplemented mapper callback");
     },
 
@@ -118,7 +121,7 @@ const createMapperCallbackBinding = (/** @type {Memory} */ memoryInstance) => ({
      * @param {number} addr
      * @param {number} value
      */
-    [MAPPERS.MBC3](addr, value){
+    [MAPPERS.MBC3](addr, value) {
         throw new Error("unimplemented mapper callback");
     },
 
@@ -127,7 +130,7 @@ const createMapperCallbackBinding = (/** @type {Memory} */ memoryInstance) => ({
      * @param {number} addr
      * @param {number} value
      */
-    [MAPPERS.MBC5](addr, value){
+    [MAPPERS.MBC5](addr, value) {
         throw new Error("unimplemented mapper callback");
     },
 
@@ -136,7 +139,7 @@ const createMapperCallbackBinding = (/** @type {Memory} */ memoryInstance) => ({
      * @param {number} addr
      * @param {number} value
      */
-    [MAPPERS.MBC6](addr, value){
+    [MAPPERS.MBC6](addr, value) {
         throw new Error("unimplemented mapper callback");
     },
 
@@ -145,7 +148,7 @@ const createMapperCallbackBinding = (/** @type {Memory} */ memoryInstance) => ({
      * @param {number} addr
      * @param {number} value
      */
-    [MAPPERS.MBC7](addr, value){
+    [MAPPERS.MBC7](addr, value) {
         throw new Error("unimplemented mapper callback");
     },
 })
@@ -153,11 +156,11 @@ const createMapperCallbackBinding = (/** @type {Memory} */ memoryInstance) => ({
 /**
  * @param {Uint8Array} romData
  */
-function decodeCartHeader(romData){    
+function decodeCartHeader(romData) {
     return {
-        MBC:        getMBC(romData[0x0147]),
-        bankCount:  getBankCount(romData[0x0148])
+        MBC: getMBC(romData[0x0147]),
+        bankCount: getBankCount(romData[0x0148])
     }
 }
 
-export { decodeCartHeader, MAPPERS, createMapperCallbackBinding}
+export { decodeCartHeader, MAPPERS, createMapperCallbackBinding }

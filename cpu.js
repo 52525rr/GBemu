@@ -50,7 +50,7 @@ class GameBoyCore {
         this.SP = 0;
         this.MMU = new Memory(this, romData);
         this.IOhandler = new IOManager(this);
-        this.halted = false;
+        this.isHalted = false;
 
         this.flags = {
             Z: 0,
@@ -229,7 +229,7 @@ class GameBoyCore {
     }
 
     stepSingle() {
-        if(this.halted){
+        if(this.isHalted){
             this.haltSkip();
             return;
         }
@@ -270,7 +270,7 @@ class GameBoyCore {
         this.runAllCachedCycles();
         while(skippedCycles < 70000){
             if((this.IEreg & this.IFreg) !== 0){
-                this.halted = false;
+                this.isHalted = false;
                 break;
             }
             const timeUntilNext = this.IOhandler.scheduler.timeUntilNext;
@@ -784,7 +784,7 @@ class GameBoyCore {
         }
 
         const HALT = () => {
-            this.halted = true;
+            this.isHalted = true;
         }
 
         /**
