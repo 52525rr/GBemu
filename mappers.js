@@ -122,7 +122,17 @@ const createMapperCallbackBinding = (/** @type {Memory} */ memoryInstance) => ({
      * @param {number} value
      */
     [MAPPERS.MBC3](addr, value) {
-        throw new Error("unimplemented mapper callback");
+        if (addr >= 0x2000 && addr <= 0x3FFF) {
+            const bankCount = memoryInstance.CART_DATA.bankCount;
+
+            let selectedBank = value & 0x7F;
+            if (selectedBank === 0) selectedBank = 1;
+            selectedBank %= bankCount;
+
+            memoryInstance.romBank = selectedBank;
+        } else if (addr >= 0x4000 && addr <= 0x5FFF) {
+            // throw new Error("RTC edit");
+        }
     },
 
 

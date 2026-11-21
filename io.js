@@ -3,6 +3,7 @@
 import { GameBoyCore, INTERRUPT_SOURCES } from "./cpu.js";
 import { PPU } from "./ppu.js";
 import { Scheduler } from "./scheduler.js";
+import { KeyHandler, BUTTON_MAPPINGS } from "./keyhandler.js";
 
 const IO_LABELS = Object.freeze({
     JOYPAD: 0x00,
@@ -36,12 +37,16 @@ const SCHEDULER_EVENTS = Object.freeze({
     LCD_MODE0: 4,
     LCD_VBLANK: 5,
     LCD_LY153_BUG: 6,
+
+    UPDATE_KEYS: 7,
 })
 
 const SCANLINE_LENGTH = 456;
 const OAM_SCAN_DOT_COUNT = 80;
 const LINE_DOT_COUNT = 160;
 const END_DELAY = 20;
+
+const UPDATE_KEY_INTERVAL = 20000;
 
 const LCD_INTR_START = Object.freeze({
     MODE2: 0,
@@ -82,6 +87,10 @@ class IOManager {
         this.OAMDMAactive = false;
         this.OAMDMAsource = 0;
         this.OAMDMAcounter = 0;
+
+        this.keyHandler = new KeyHandler();
+
+        this.scheduler.addEventOffset(0, SCHEDULER_EVENTS.UPDATE_KEYS);
     }
 
     /**
@@ -143,10 +152,18 @@ class IOManager {
                     }
 
                     this.scheduler.reschedule(Infinity, SCHEDULER_EVENTS.LCD_LY153_BUG);
+
+                } break;
+
+                case SCHEDULER_EVENTS.UPDATE_KEYS: {
+                    this.keyHandler.updateButtonState();
+                    this.scheduler.reschedule(UPDATE_KEY_INTERVAL, SCHEDULER_EVENTS.UPDATE_KEYS, true);
+
                 } break;
 
                 default: {
                     debugger;
+
                 } break;
             }
         }
@@ -164,10 +181,33 @@ class IOManager {
 
         switch (ioLower) {
             case IO_LABELS.JOYPAD: {
-                const buttonsSelected = (byte >> 5 & 1) !== 0;
-                const dPadSelected = (byte >> 4 & 1) !== 0;
+                const buttonsSelected = (byte >> 5 & 1) === 0;
+                const dPadSelected = (byte >> 4 & 1) === 0;
 
-                this.JOYPAD |= 0b1111;
+                const BLANK_BUTTONS = 0b1111;
+
+                const buttons = this.keyHandler.isButtonPressed;
+
+                const dPadPressed = ~(
+                    +buttons[BUTTON_MAPPINGS.RIGHT] << 0 |
+                    +buttons[BUTTON_MAPPINGS.LEFT]  << 1 |
+                    +buttons[BUTTON_MAPPINGS.UP]    << 2 |
+                    +buttons[BUTTON_MAPPINGS.DOWN]  << 3
+                );
+
+                const buttonPressed = ~(
+                    +buttons[BUTTON_MAPPINGS.A]      << 0 |
+                    +buttons[BUTTON_MAPPINGS.B]      << 1 |
+                    +buttons[BUTTON_MAPPINGS.SELECT] << 2 |
+                    +buttons[BUTTON_MAPPINGS.START]  << 3
+                );
+
+                this.JOYPAD |= BLANK_BUTTONS;
+
+                this.JOYPAD &= (
+                    (buttonsSelected ? buttonPressed : BLANK_BUTTONS) & 
+                    (dPadSelected ? dPadPressed : BLANK_BUTTONS)
+                );
             } break;
 
             case IO_LABELS.DIV: {
@@ -279,7 +319,7 @@ class IOManager {
         this.OAMDMAsource = byte << 8;
         this.OAMDMAcounter = 0;
 
-        console.log(`OAM INIT: 0x${byte.toString(16)}00`)
+        // console.log(`OAM INIT: 0x${byte.toString(16)}00`)
     }
 
     /**
@@ -295,6 +335,10 @@ class IOManager {
                 break;
             }
         }
+    }
+
+    static updateUserInput() {
+        
     }
 
     get JOYPAD() {

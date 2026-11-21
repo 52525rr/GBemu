@@ -26,8 +26,8 @@ async function _run(cpuInstance) {
     const text = document.getElementById("A");
 
     cpuInstance.resetCPU();
-    while(1){
-        while(cpuInstance.frameCycles < CYCLES_PER_FRAME){
+    while (1) {
+        while (cpuInstance.frameCycles < CYCLES_PER_FRAME) {
             cpuInstance.stepSingle();
         }
         cpuInstance.frameCycles -= CYCLES_PER_FRAME;
